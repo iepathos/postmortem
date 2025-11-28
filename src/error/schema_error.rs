@@ -195,6 +195,18 @@ impl SchemaErrors {
     pub fn as_non_empty_vec(&self) -> &NonEmptyVec<SchemaError> {
         &self.0
     }
+
+    /// Creates a `SchemaErrors` from a `Vec<SchemaError>`.
+    ///
+    /// Returns the `SchemaErrors` if the vec is non-empty, or panics if empty.
+    /// Use this when you're certain the vec contains at least one error.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the provided vec is empty.
+    pub fn from_vec(errors: Vec<SchemaError>) -> Self {
+        Self(NonEmptyVec::from_vec(errors).expect("SchemaErrors requires at least one error"))
+    }
 }
 
 impl Semigroup for SchemaErrors {
