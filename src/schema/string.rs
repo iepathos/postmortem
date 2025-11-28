@@ -10,6 +10,8 @@ use stillwater::Validation;
 use crate::error::{SchemaError, SchemaErrors};
 use crate::path::JsonPath;
 
+use super::traits::SchemaLike;
+
 /// A constraint applied to string values.
 #[derive(Clone)]
 enum StringConstraint {
@@ -236,6 +238,18 @@ impl StringSchema {
 impl Default for StringSchema {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+impl SchemaLike for StringSchema {
+    type Output = String;
+
+    fn validate(&self, value: &Value, path: &JsonPath) -> Validation<Self::Output, SchemaErrors> {
+        self.validate(value, path)
+    }
+
+    fn validate_to_value(&self, value: &Value, path: &JsonPath) -> Validation<Value, SchemaErrors> {
+        self.validate(value, path).map(Value::String)
     }
 }
 

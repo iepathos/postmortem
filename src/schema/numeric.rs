@@ -10,6 +10,8 @@ use stillwater::Validation;
 use crate::error::{SchemaError, SchemaErrors};
 use crate::path::JsonPath;
 
+use super::traits::SchemaLike;
+
 /// A constraint applied to integer values.
 #[derive(Clone)]
 enum IntegerConstraint {
@@ -336,6 +338,18 @@ impl IntegerSchema {
 impl Default for IntegerSchema {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+impl SchemaLike for IntegerSchema {
+    type Output = i64;
+
+    fn validate(&self, value: &Value, path: &JsonPath) -> Validation<Self::Output, SchemaErrors> {
+        self.validate(value, path)
+    }
+
+    fn validate_to_value(&self, value: &Value, path: &JsonPath) -> Validation<Value, SchemaErrors> {
+        self.validate(value, path).map(|n| Value::Number(n.into()))
     }
 }
 
