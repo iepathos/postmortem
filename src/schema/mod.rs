@@ -16,8 +16,10 @@
 //! assert!(result.is_success());
 //! ```
 
+mod numeric;
 mod string;
 
+pub use numeric::IntegerSchema;
 pub use string::StringSchema;
 
 /// Entry point for creating validation schemas.
@@ -66,5 +68,33 @@ impl Schema {
     /// ```
     pub fn string() -> StringSchema {
         StringSchema::new()
+    }
+
+    /// Creates a new integer schema.
+    ///
+    /// The returned schema validates that values are integers (not floats).
+    /// Use builder methods to add constraints like minimum/maximum value,
+    /// range, or sign requirements.
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// use postmortem::{Schema, JsonPath};
+    /// use serde_json::json;
+    ///
+    /// let schema = Schema::integer().min(0).max(100);
+    ///
+    /// let result = schema.validate(&json!(50), &JsonPath::root());
+    /// assert!(result.is_success());
+    ///
+    /// let result = schema.validate(&json!(-5), &JsonPath::root());
+    /// assert!(result.is_failure());
+    ///
+    /// // Float values are rejected
+    /// let result = schema.validate(&json!(1.5), &JsonPath::root());
+    /// assert!(result.is_failure());
+    /// ```
+    pub fn integer() -> IntegerSchema {
+        IntegerSchema::new()
     }
 }
