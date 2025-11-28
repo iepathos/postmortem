@@ -23,9 +23,9 @@ fn test_schema_errors_never_empty() {
     let error = SchemaError::new(JsonPath::root(), "test error");
     let errors = SchemaErrors::single(error);
 
-    // is_empty always returns false for SchemaErrors
+    // is_empty always returns false for SchemaErrors (guarantees at least one error)
     assert!(!errors.is_empty());
-    assert!(errors.len() >= 1);
+    assert_eq!(errors.len(), 1);
 }
 
 #[test]
