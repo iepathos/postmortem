@@ -2,11 +2,13 @@
 name = "postmortem"
 version = "0.1.0"
 edition = "2021"
-description = "A validation library that accumulates all errors for comprehensive feedback"
+authors = ["Glen Baker <iepathos@gmail.com>"]
 license = "MIT"
-repository = "https://github.com/example/postmortem"
-keywords = ["validation", "error", "schema"]
-categories = ["data-structures"]
+description = "A validation library that accumulates all errors for comprehensive feedback"
+repository = "https://github.com/iepathos/postmortem"
+keywords = ["validation", "error", "schema", "errors", "postmortem"]
+categories = ["data-structures", "rust-patterns"]
+readme = "README.md"
 
 [dependencies]
 stillwater = "0.11"
