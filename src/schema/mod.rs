@@ -16,11 +16,13 @@
 //! assert!(result.is_success());
 //! ```
 
+mod array;
 mod numeric;
 mod object;
 mod string;
 mod traits;
 
+pub use array::ArraySchema;
 pub use numeric::IntegerSchema;
 pub use object::ObjectSchema;
 pub use string::StringSchema;
@@ -133,5 +135,37 @@ impl Schema {
     /// ```
     pub fn object() -> ObjectSchema {
         ObjectSchema::new()
+    }
+
+    /// Creates a new array schema with the given item schema.
+    ///
+    /// The returned schema validates that values are arrays and that each item
+    /// passes validation against the provided item schema. Use builder methods
+    /// to add constraints like minimum/maximum length or uniqueness.
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// use postmortem::{Schema, JsonPath};
+    /// use serde_json::json;
+    ///
+    /// // Array of positive integers
+    /// let schema = Schema::array(Schema::integer().positive())
+    ///     .min_len(1)
+    ///     .max_len(10);
+    ///
+    /// let result = schema.validate(&json!([1, 2, 3]), &JsonPath::root());
+    /// assert!(result.is_success());
+    ///
+    /// // Empty array fails min_len constraint
+    /// let result = schema.validate(&json!([]), &JsonPath::root());
+    /// assert!(result.is_failure());
+    ///
+    /// // Non-positive integer fails item validation
+    /// let result = schema.validate(&json!([1, -2, 3]), &JsonPath::root());
+    /// assert!(result.is_failure());
+    /// ```
+    pub fn array<S: SchemaLike>(item_schema: S) -> ArraySchema<S> {
+        ArraySchema::new(item_schema)
     }
 }

@@ -43,7 +43,7 @@ pub mod schema;
 
 pub use error::{SchemaError, SchemaErrors};
 pub use path::{JsonPath, PathSegment};
-pub use schema::{IntegerSchema, ObjectSchema, Schema, SchemaLike, StringSchema};
+pub use schema::{ArraySchema, IntegerSchema, ObjectSchema, Schema, SchemaLike, StringSchema};
 
 /// Type alias for validation results using SchemaErrors
 pub type ValidationResult<T> = stillwater::Validation<T, SchemaErrors>;
