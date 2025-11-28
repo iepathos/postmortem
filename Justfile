@@ -1,0 +1,303 @@
+# Postmortem - Justfile
+# Quick development commands for Rust library projects
+
+# Default recipe - show available commands
+default:
+    @just --list
+
+# Development commands
+alias t := test
+alias c := check
+alias f := fmt
+alias l := lint
+
+# === BUILDING ===
+
+# Build the project
+build:
+    cargo build
+
+# Build in release mode
+build-release:
+    cargo build --release
+
+# Clean build artifacts
+clean:
+    cargo clean
+
+# === TESTING ===
+
+# Run all tests with nextest for faster execution
+test:
+    cargo build
+    @echo "Running tests with cargo nextest..."
+    cargo nextest run
+
+# Run tests with output
+test-verbose:
+    cargo nextest run --nocapture
+
+# Run tests with specific pattern
+test-pattern PATTERN:
+    cargo nextest run {{PATTERN}}
+
+# Run tests and watch for changes
+test-watch:
+    cargo watch -x 'nextest run'
+
+# Run tests with coverage using llvm-cov
+coverage:
+    #!/usr/bin/env bash
+    export PATH="$HOME/.cargo/bin:$PATH"
+    echo "Building postmortem..."
+    cargo build
+    echo "Cleaning previous coverage data..."
+    cargo llvm-cov clean
+    echo "Generating code coverage report with llvm-cov..."
+    cargo llvm-cov --all-features --lib --html --output-dir target/coverage
+    echo "Coverage report generated at target/coverage/html/index.html"
+
+# Run tests with coverage (lcov format)
+coverage-lcov:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    export PATH="$HOME/.cargo/bin:$PATH"
+    echo "Building postmortem..."
+    cargo build
+    echo "Cleaning previous coverage data..."
+    cargo llvm-cov clean
+    mkdir -p target/coverage
+    echo "Generating code coverage report with llvm-cov (lcov format)..."
+    cargo llvm-cov --all-features --lib --lcov --output-path target/coverage/lcov.info
+    echo "Coverage report generated at target/coverage/lcov.info"
+    if [ ! -f target/coverage/lcov.info ]; then
+        echo "ERROR: Coverage file was not generated at target/coverage/lcov.info"
+        exit 1
+    fi
+
+# Run tests with coverage and check threshold
+coverage-check:
+    #!/usr/bin/env bash
+    export PATH="$HOME/.cargo/bin:$PATH"
+    echo "Building postmortem..."
+    cargo build
+    echo "Checking code coverage threshold..."
+    cargo llvm-cov clean
+    mkdir -p target/coverage
+    cargo llvm-cov --all-features --lib --json --output-path target/coverage/coverage.json
+    COVERAGE=$(cat target/coverage/coverage.json | jq -r '.data[0].totals.lines.percent')
+    echo "Current coverage: ${COVERAGE}%"
+    if (( $(echo "$COVERAGE < 80" | bc -l) )); then
+        echo "Warning: Coverage is below 80%: $COVERAGE%"
+        exit 1
+    else
+        echo "Coverage meets 80% threshold: $COVERAGE%"
+    fi
+
+# Open coverage report in browser
+coverage-open: coverage
+    open target/coverage/html/index.html
+
+# Run integration tests only
+test-integration:
+    cargo nextest run --test '*'
+
+# Run benchmarks
+bench:
+    cargo bench
+
+# Run ignored tests
+test-ignored:
+    cargo nextest run --run-ignored ignored-only
+
+# Run all tests including ignored ones
+test-all:
+    cargo nextest run --run-ignored all
+
+# === CODE QUALITY ===
+
+# Format code
+fmt:
+    cargo fmt
+
+# Check formatting without making changes
+fmt-check:
+    cargo fmt --check
+
+# Run clippy linter
+lint:
+    cargo clippy -- -D warnings
+
+# Run clippy with all targets
+lint-all:
+    cargo clippy --lib --tests --all-features -- -D warnings
+
+# Quick check without building
+check:
+    cargo check
+
+# Check all targets and features
+check-all:
+    cargo check --all-targets --all-features
+
+# Fix automatically fixable lints
+fix:
+    cargo fix --allow-dirty
+
+# === DOCUMENTATION ===
+
+# Generate and open documentation
+doc:
+    cargo doc --open
+
+# Generate documentation for all dependencies
+doc-all:
+    cargo doc --all --open
+
+# Check documentation for errors
+doc-check:
+    cargo doc --no-deps
+
+# === DEPENDENCIES ===
+
+# Update dependencies
+update:
+    cargo update
+
+# Audit dependencies for security vulnerabilities
+audit:
+    cargo audit
+
+# Check for outdated dependencies
+outdated:
+    cargo outdated
+
+# Add a new dependency
+add CRATE:
+    cargo add {{CRATE}}
+
+# Add a development dependency
+add-dev CRATE:
+    cargo add --dev {{CRATE}}
+
+# Remove a dependency
+remove CRATE:
+    cargo remove {{CRATE}}
+
+# === UTILITY ===
+
+# Show project tree structure
+tree:
+    tree -I 'target|node_modules'
+
+# Show git status
+status:
+    git status
+
+# Create a new module
+new-module NAME:
+    mkdir -p src/{{NAME}}
+    echo "//! {{NAME}} module" > src/{{NAME}}/mod.rs
+    echo "pub mod {{NAME}};" >> src/lib.rs
+
+# Create a new integration test
+new-test NAME:
+    echo "//! Integration test for {{NAME}}" > tests/{{NAME}}.rs
+
+# === CI/CD SIMULATION ===
+
+# Run all CI checks locally (matches GitHub Actions)
+ci:
+    @echo "Running CI checks..."
+    @export CARGO_TERM_COLOR=always && \
+     export CARGO_INCREMENTAL=0 && \
+     export RUSTFLAGS="-Dwarnings" && \
+     export RUST_BACKTRACE=1 && \
+     echo "Running tests with nextest..." && \
+     cargo nextest run --all-features && \
+     echo "Running doctests..." && \
+     cargo test --doc --all-features && \
+     echo "Running clippy..." && \
+     cargo clippy --all-targets --all-features -- -D warnings && \
+     echo "Checking formatting..." && \
+     cargo fmt --all -- --check && \
+     echo "Checking documentation..." && \
+     cargo doc --no-deps --document-private-items && \
+     echo "Checking Cargo.lock is up to date..." && \
+     cargo generate-lockfile && \
+     git diff --exit-code Cargo.lock && \
+     echo "All CI checks passed!"
+
+# Full CI build pipeline
+ci-build:
+    @echo "Building postmortem..."
+    @echo "Checking code formatting..."
+    cargo fmt --all -- --check
+    @echo "Running clippy..."
+    cargo clippy --lib --tests --all-features -- -D warnings
+    @echo "Building project..."
+    cargo build --release
+    @echo "Running tests..."
+    cargo nextest run --all
+    @echo "Build successful!"
+
+# Pre-commit hook simulation
+pre-commit: fmt lint test
+    @echo "Pre-commit checks passed!"
+
+# Full development cycle check
+full-check: clean build test lint doc audit
+    @echo "Full development cycle completed successfully!"
+
+# === INSTALLATION ===
+
+# Install development tools
+install-tools:
+    rustup component add rustfmt clippy llvm-tools-preview
+    cargo install cargo-watch cargo-llvm-cov cargo-audit cargo-outdated cargo-nextest
+
+# Install additional development tools
+install-extras:
+    cargo install cargo-expand cargo-machete cargo-deny cargo-udeps
+
+# === RELEASE ===
+
+# Prepare for release (dry run)
+release-check:
+    cargo publish --dry-run
+
+# Create a new release (requires manual version bump)
+release:
+    cargo publish
+
+# === ADVANCED ===
+
+# Expand macros for debugging
+expand:
+    cargo expand
+
+# Find unused dependencies
+unused-deps:
+    cargo machete
+
+# Security-focused dependency check
+security-check:
+    cargo deny check
+
+# Find duplicate dependencies
+duplicate-deps:
+    cargo tree --duplicates
+
+# === HELP ===
+
+# Show detailed help for cargo commands
+help:
+    @echo "Cargo commands reference:"
+    @echo "  cargo test     - Run tests"
+    @echo "  cargo build    - Build the project"
+    @echo "  cargo fmt      - Format code"
+    @echo "  cargo clippy   - Run linter"
+    @echo "  cargo check    - Quick syntax check"
+    @echo "  cargo doc      - Generate documentation"
+    @echo ""
+    @echo "Use 'just <command>' for convenience aliases!"
