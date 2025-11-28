@@ -56,9 +56,11 @@ Implement an object schema type that:
    - All field errors are accumulated
 
 5. **Validation Output**
-   - Returns validated object with typed field values
+   - Returns `Validation::Success` with validated object on success
+   - Returns `Validation::Failure` with accumulated errors on failure
    - Missing optional fields are omitted or use defaults
    - Unknown fields handled per additional_properties setting
+   - Use stillwater's `success()`/`failure()` helper functions
 
 ### Non-Functional Requirements
 
@@ -153,9 +155,11 @@ impl ObjectSchema {
     }
 
     pub fn validate(&self, value: &Value, path: &JsonPath) -> Validation<ValidatedObject, SchemaErrors> {
+        use stillwater::validation::{success, failure};
+
         let obj = match value.as_object() {
             Some(o) => o,
-            None => return Validation::invalid(SchemaErrors::single(
+            None => return failure(SchemaErrors::single(
                 SchemaError::new(path.clone(), "expected object")
                     .with_code("invalid_type")
                     .with_got(value_type_name(value))
@@ -211,9 +215,9 @@ impl ObjectSchema {
         }
 
         if errors.is_empty() {
-            Validation::valid(ValidatedObject(validated))
+            success(ValidatedObject(validated))
         } else {
-            Validation::invalid(SchemaErrors::from_vec(errors).unwrap())
+            failure(SchemaErrors::from_vec(errors).unwrap())
         }
     }
 }

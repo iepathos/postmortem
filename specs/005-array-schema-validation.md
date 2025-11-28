@@ -54,8 +54,10 @@ Implement an array schema type that:
    - All item errors are accumulated
 
 5. **Validation Output**
-   - Returns validated array with typed items
+   - Returns `Validation::Success` with validated array on success
+   - Returns `Validation::Failure` with accumulated errors on failure
    - Original order preserved
+   - Use stillwater's `success()`/`failure()` helper functions
 
 ### Non-Functional Requirements
 
@@ -137,9 +139,11 @@ impl<S: SchemaLike> ArraySchema<S> {
     }
 
     pub fn validate(&self, value: &Value, path: &JsonPath) -> Validation<Vec<ValidatedValue>, SchemaErrors> {
+        use stillwater::validation::{success, failure};
+
         let arr = match value.as_array() {
             Some(a) => a,
-            None => return Validation::invalid(SchemaErrors::single(
+            None => return failure(SchemaErrors::single(
                 SchemaError::new(path.clone(), "expected array")
                     .with_code("invalid_type")
                     .with_got(value_type_name(value))
@@ -212,9 +216,9 @@ impl<S: SchemaLike> ArraySchema<S> {
         }
 
         if errors.is_empty() {
-            Validation::valid(validated_items)
+            success(validated_items)
         } else {
-            Validation::invalid(SchemaErrors::from_vec(errors).unwrap())
+            failure(SchemaErrors::from_vec(errors).unwrap())
         }
     }
 }

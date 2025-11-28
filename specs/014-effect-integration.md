@@ -216,29 +216,31 @@ impl<E: Env> AsyncStringSchema<E> {
         path: &JsonPath,
     ) -> Effect<E, Never, Validation<String, SchemaErrors>> {
         Effect::from_fn(move |env: &E| {
+            use stillwater::validation::{success, failure};
+
             // Run sync validation first
             let sync_result = self.sync_schema.validate(value, path);
 
             match sync_result {
-                Validation::Invalid(errors) => {
+                Validation::Failure(errors) => {
                     // If sync fails, return those errors
-                    Ok(Validation::invalid(errors))
+                    Ok(failure(errors))
                 }
-                Validation::Valid(validated) => {
+                Validation::Success(validated) => {
                     // Run async validators
                     let mut all_errors = Vec::new();
 
                     for validator in &self.async_validators {
                         let result = validator.validate_async(value, path).run(env)?;
-                        if let Validation::Invalid(errors) = result {
+                        if let Validation::Failure(errors) = result {
                             all_errors.extend(errors.into_iter());
                         }
                     }
 
                     if all_errors.is_empty() {
-                        Ok(Validation::valid(validated))
+                        Ok(success(validated))
                     } else {
-                        Ok(Validation::invalid(SchemaErrors::from_vec(all_errors).unwrap()))
+                        Ok(failure(SchemaErrors::from_vec(all_errors).unwrap()))
                     }
                 }
             }
@@ -262,18 +264,20 @@ where
         path: &JsonPath,
     ) -> Effect<E, Never, Validation<(), SchemaErrors>> {
         Effect::from_fn(move |_env: &E| {
+            use stillwater::validation::{success, failure};
+
             let email = value.as_str().unwrap_or("");
 
             // This would be an async DB lookup in practice
             let exists = self.db.email_exists(email);
 
             if exists {
-                Ok(Validation::invalid(SchemaErrors::single(
+                Ok(failure(SchemaErrors::single(
                     SchemaError::new(path.clone(), "email already exists")
                         .with_code("unique_email")
                 )))
             } else {
-                Ok(Validation::valid(()))
+                Ok(success(()))
             }
         })
     }
@@ -408,16 +412,18 @@ impl AsyncValidator<AppEnv> for UniqueUsername {
         path: &JsonPath,
     ) -> Effect<AppEnv, Never, Validation<(), SchemaErrors>> {
         Effect::from_fn(|env| {
+            use stillwater::validation::{success, failure};
+
             let username = value.as_str().unwrap_or("");
             let exists = env.db.username_exists(username);
 
             if exists {
-                Ok(Validation::invalid(SchemaErrors::single(
+                Ok(failure(SchemaErrors::single(
                     SchemaError::new(path.clone(), "username already taken")
                         .with_code("unique_username")
                 )))
             } else {
-                Ok(Validation::valid(()))
+                Ok(success(()))
             }
         })
     }

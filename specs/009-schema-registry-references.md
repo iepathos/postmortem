@@ -173,9 +173,11 @@ impl SchemaLike for RefSchema {
         path: &JsonPath,
         context: &ValidationContext,
     ) -> Validation<ValidatedValue, SchemaErrors> {
+        use stillwater::validation::failure;
+
         // Check depth
         if context.depth() > context.max_depth() {
-            return Validation::invalid(SchemaErrors::single(
+            return failure(SchemaErrors::single(
                 SchemaError::new(path.clone(), format!(
                     "maximum reference depth {} exceeded at path '{}'",
                     context.max_depth(),
@@ -189,7 +191,7 @@ impl SchemaLike for RefSchema {
         let schema = match context.registry().get(&self.name) {
             Some(s) => s,
             None => {
-                return Validation::invalid(SchemaErrors::single(
+                return failure(SchemaErrors::single(
                     SchemaError::new(
                         path.clone(),
                         format!("schema '{}' not found in registry", self.name),
@@ -362,8 +364,8 @@ let result = registry.validate("User", &json!({
 }));
 
 match result {
-    Ok(Validation::Valid(user)) => println!("Valid user: {:?}", user),
-    Ok(Validation::Invalid(errors)) => println!("Invalid: {:?}", errors),
+    Ok(Validation::Success(user)) => println!("Valid user: {:?}", user),
+    Ok(Validation::Failure(errors)) => println!("Invalid: {:?}", errors),
     Err(e) => println!("Registry error: {}", e),
 }
 
@@ -383,5 +385,5 @@ let comment_tree = json!({
 });
 
 let result = registry.validate("Comment", &comment_tree);
-assert!(matches!(result, Ok(Validation::Valid(_))));
+assert!(matches!(result, Ok(Validation::Success(_))));
 ```

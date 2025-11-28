@@ -150,7 +150,7 @@ impl CombinatorSchema {
 
         let valid: Vec<_> = results
             .iter()
-            .filter(|(_, r)| r.is_valid())
+            .filter(|(_, r)| r.is_success())
             .collect();
 
         match valid.len() {
@@ -159,7 +159,7 @@ impl CombinatorSchema {
                 let branch_errors: Vec<_> = results
                     .into_iter()
                     .filter_map(|(i, r)| match r {
-                        Validation::Invalid(e) => Some((i, e)),
+                        Validation::Failure(e) => Some((i, e)),
                         _ => None,
                     })
                     .collect();
@@ -170,7 +170,7 @@ impl CombinatorSchema {
                 )
                 .with_code("one_of_none_matched");
 
-                Validation::invalid(SchemaErrors::single(error))
+                failure(SchemaErrors::single(error))
             }
             1 => {
                 // Exactly one matched - success
@@ -186,7 +186,7 @@ impl CombinatorSchema {
                 )
                 .with_code("one_of_multiple_matched");
 
-                Validation::invalid(SchemaErrors::single(error))
+                failure(SchemaErrors::single(error))
             }
         }
     }
@@ -197,12 +197,14 @@ impl CombinatorSchema {
         value: &Value,
         path: &JsonPath,
     ) -> Validation<ValidatedValue, SchemaErrors> {
+        use stillwater::validation::{success, failure};
+
         let mut all_errors = Vec::new();
 
         for schema in schemas {
             match schema.validate(value, path) {
-                Validation::Valid(v) => return Validation::valid(v),
-                Validation::Invalid(e) => all_errors.extend(e.into_iter()),
+                Validation::Success(v) => return success(v),
+                Validation::Failure(e) => all_errors.extend(e.into_iter()),
             }
         }
 
@@ -213,7 +215,7 @@ impl CombinatorSchema {
         )
         .with_code("any_of_none_matched");
 
-        Validation::invalid(SchemaErrors::single(error))
+        failure(SchemaErrors::single(error))
     }
 
     fn validate_all_of(
@@ -222,20 +224,22 @@ impl CombinatorSchema {
         value: &Value,
         path: &JsonPath,
     ) -> Validation<ValidatedValue, SchemaErrors> {
+        use stillwater::validation::{success, failure};
+
         let mut all_errors = Vec::new();
         let mut last_valid = None;
 
         for schema in schemas {
             match schema.validate(value, path) {
-                Validation::Valid(v) => last_valid = Some(v),
-                Validation::Invalid(e) => all_errors.extend(e.into_iter()),
+                Validation::Success(v) => last_valid = Some(v),
+                Validation::Failure(e) => all_errors.extend(e.into_iter()),
             }
         }
 
         if all_errors.is_empty() {
-            Validation::valid(last_valid.unwrap())
+            success(last_valid.unwrap())
         } else {
-            Validation::invalid(SchemaErrors::from_vec(all_errors).unwrap())
+            failure(SchemaErrors::from_vec(all_errors).unwrap())
         }
     }
 
@@ -245,8 +249,10 @@ impl CombinatorSchema {
         value: &Value,
         path: &JsonPath,
     ) -> Validation<ValidatedValue, SchemaErrors> {
+        use stillwater::validation::success;
+
         if value.is_null() {
-            Validation::valid(ValidatedValue::Null)
+            success(ValidatedValue::Null)
         } else {
             inner.validate(value, path)
         }
@@ -384,11 +390,11 @@ let result = shape.validate(&json!({
     "type": "circle",
     "radius": 5
 }), &JsonPath::root());
-assert!(result.is_valid());
+assert!(result.is_success());
 
 let result = id.validate(&json!("abc-123"), &JsonPath::root());
-assert!(result.is_valid());
+assert!(result.is_success());
 
 let result = id.validate(&json!(42), &JsonPath::root());
-assert!(result.is_valid());
+assert!(result.is_success());
 ```

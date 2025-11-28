@@ -41,7 +41,8 @@ Enable validation of relationships between fields:
 1. **Object Custom Validation**
    - `.custom(fn)` on ObjectSchema
    - Custom function receives entire validated object
-   - Returns `Validation<(), SchemaErrors>`
+   - Returns `Validation<(), SchemaErrors>` using stillwater's constructors
+   - Use `success(())` for passing, `failure(errors)` for failing
    - Runs after all field validations pass
    - Multiple custom validators can be chained
 
@@ -113,12 +114,14 @@ impl ObjectSchema {
         let required_field = required_field.into();
 
         self.custom(move |obj, path| {
+            use stillwater::validation::{success, failure};
+
             let condition_value = obj.get(&condition_field);
             let required_value = obj.get(&required_field);
 
             match (condition_value, required_value) {
                 (Some(cv), None) if predicate(cv) => {
-                    Validation::invalid(SchemaErrors::single(
+                    failure(SchemaErrors::single(
                         SchemaError::new(
                             path.push_field(&required_field),
                             format!("'{}' is required when '{}' matches condition", required_field, condition_field),
@@ -126,7 +129,7 @@ impl ObjectSchema {
                         .with_code("conditional_required")
                     ))
                 }
-                _ => Validation::valid(()),
+                _ => success(()),
             }
         })
     }
@@ -140,11 +143,13 @@ impl ObjectSchema {
         let field2 = field2.into();
 
         self.custom(move |obj, path| {
+            use stillwater::validation::{success, failure};
+
             let has_field1 = obj.get(&field1).is_some_and(|v| !v.is_null());
             let has_field2 = obj.get(&field2).is_some_and(|v| !v.is_null());
 
             if has_field1 && has_field2 {
-                Validation::invalid(SchemaErrors::single(
+                failure(SchemaErrors::single(
                     SchemaError::new(
                         path.clone(),
                         format!("'{}' and '{}' are mutually exclusive", field1, field2),
@@ -152,7 +157,7 @@ impl ObjectSchema {
                     .with_code("mutually_exclusive")
                 ))
             } else {
-                Validation::valid(())
+                success(())
             }
         })
     }
@@ -165,14 +170,16 @@ impl ObjectSchema {
         let fields: Vec<String> = fields.into_iter().map(Into::into).collect();
 
         self.custom(move |obj, path| {
+            use stillwater::validation::{success, failure};
+
             let has_any = fields.iter().any(|f| {
                 obj.get(f).is_some_and(|v| !v.is_null())
             });
 
             if has_any {
-                Validation::valid(())
+                success(())
             } else {
-                Validation::invalid(SchemaErrors::single(
+                failure(SchemaErrors::single(
                     SchemaError::new(
                         path.clone(),
                         format!("at least one of {:?} is required", fields),
@@ -192,12 +199,14 @@ impl ObjectSchema {
         let field2 = field2.into();
 
         self.custom(move |obj, path| {
+            use stillwater::validation::{success, failure};
+
             let value1 = obj.get(&field1);
             let value2 = obj.get(&field2);
 
             match (value1, value2) {
                 (Some(v1), Some(v2)) if v1 != v2 => {
-                    Validation::invalid(SchemaErrors::single(
+                    failure(SchemaErrors::single(
                         SchemaError::new(
                             path.push_field(&field2),
                             format!("'{}' must match '{}'", field2, field1),
@@ -205,7 +214,7 @@ impl ObjectSchema {
                         .with_code("fields_not_equal")
                     ))
                 }
-                _ => Validation::valid(()),
+                _ => success(()),
             }
         })
     }
@@ -219,6 +228,8 @@ impl ObjectSchema {
         let field2 = field2.into();
 
         self.custom(move |obj, path| {
+            use stillwater::validation::{success, failure};
+
             let value1 = obj.get(&field1);
             let value2 = obj.get(&field2);
 
@@ -228,7 +239,7 @@ impl ObjectSchema {
                     let f1 = n1.as_f64().unwrap_or(f64::NAN);
                     let f2 = n2.as_f64().unwrap_or(f64::NAN);
                     if f1 >= f2 {
-                        Validation::invalid(SchemaErrors::single(
+                        failure(SchemaErrors::single(
                             SchemaError::new(
                                 path.push_field(&field1),
                                 format!("'{}' must be less than '{}'", field1, field2),
@@ -236,12 +247,12 @@ impl ObjectSchema {
                             .with_code("field_not_less_than")
                         ))
                     } else {
-                        Validation::valid(())
+                        success(())
                     }
                 }
                 (Some(Value::String(s1)), Some(Value::String(s2))) => {
                     if s1 >= s2 {
-                        Validation::invalid(SchemaErrors::single(
+                        failure(SchemaErrors::single(
                             SchemaError::new(
                                 path.push_field(&field1),
                                 format!("'{}' must be less than '{}'", field1, field2),
@@ -249,10 +260,10 @@ impl ObjectSchema {
                             .with_code("field_not_less_than")
                         ))
                     } else {
-                        Validation::valid(())
+                        success(())
                     }
                 }
-                _ => Validation::valid(()), // Skip if fields don't exist or aren't comparable
+                _ => success(()), // Skip if fields don't exist or aren't comparable
             }
         })
     }
@@ -271,7 +282,7 @@ impl ObjectSchema {
 
         let mut errors = Vec::new();
         for validator in &self.cross_field_validators {
-            if let Validation::Invalid(e) = validator(validated, path) {
+            if let Validation::Failure(e) = validator(validated, path) {
                 errors.extend(e.into_iter());
             }
         }
@@ -396,17 +407,19 @@ let order = Schema::object()
     .field("unit_price", Schema::integer().non_negative())
     .field("total", Schema::integer().non_negative())
     .custom(|obj, path| {
+        use stillwater::validation::{success, failure};
+
         let qty = obj.get("quantity").and_then(|v| v.as_i64()).unwrap_or(0);
         let price = obj.get("unit_price").and_then(|v| v.as_i64()).unwrap_or(0);
         let total = obj.get("total").and_then(|v| v.as_i64()).unwrap_or(0);
 
         if qty * price != total {
-            Validation::invalid(SchemaErrors::single(
+            failure(SchemaErrors::single(
                 SchemaError::new(path.push_field("total"), "total must equal quantity * unit_price")
                     .with_code("invalid_total")
             ))
         } else {
-            Validation::valid(())
+            success(())
         }
     });
 

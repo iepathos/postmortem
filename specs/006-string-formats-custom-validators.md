@@ -59,8 +59,9 @@ Extend string schema with:
 
 5. **Custom Validators**
    - `.custom(fn)` - arbitrary validation function
-   - Custom function returns `Validation<(), SchemaErrors>`
+   - Custom function returns `Validation<(), SchemaErrors>` using stillwater's constructors
    - Multiple custom validators can be chained
+   - Use `success(())` for passing, `failure(errors)` for failing
 
 6. **Integer Enumeration (bonus)**
    - `.one_of(values)` on integer schema
@@ -365,6 +366,8 @@ let username = Schema::string()
 let password = Schema::string()
     .min_len(8)
     .custom(|s, path| {
+        use stillwater::validation::{success, failure};
+
         let has_uppercase = s.chars().any(|c| c.is_uppercase());
         let has_digit = s.chars().any(|c| c.is_numeric());
 
@@ -379,9 +382,9 @@ let password = Schema::string()
         }
 
         if errors.is_empty() {
-            Validation::valid(())
+            success(())
         } else {
-            Validation::invalid(SchemaErrors::from_vec(errors).unwrap())
+            failure(SchemaErrors::from_vec(errors).unwrap())
         }
     });
 ```

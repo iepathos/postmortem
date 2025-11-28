@@ -231,8 +231,8 @@ mod axum_integration {
             schema: &S,
         ) -> Result<ValidatedValue, ApiValidationError> {
             match schema.validate(&self, &JsonPath::root()) {
-                Validation::Valid(v) => Ok(v),
-                Validation::Invalid(errors) => Err(errors.to_api_response()),
+                Validation::Success(v) => Ok(v),
+                Validation::Failure(errors) => Err(errors.to_api_response()),
             }
         }
     }
@@ -453,8 +453,8 @@ async fn create_user(body: web::Json<Value>) -> Result<HttpResponse, ApiValidati
         .field("age", Schema::integer().min(18));
 
     match schema.validate(&body, &JsonPath::root()) {
-        Validation::Valid(user) => Ok(HttpResponse::Created().json(user)),
-        Validation::Invalid(errors) => Err(errors.to_api_response()),
+        Validation::Success(user) => Ok(HttpResponse::Created().json(user)),
+        Validation::Failure(errors) => Err(errors.to_api_response()),
     }
 }
 

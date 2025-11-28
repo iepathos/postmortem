@@ -56,9 +56,11 @@ Create the foundational error types and path tracking system that enables:
 
 4. **Validation Integration**
    - All validation operations return `Validation<T, SchemaErrors>`
-   - Errors accumulate automatically via Validation's applicative instance
-   - Support mapping over successful values
-   - Support flat_map for dependent validations
+   - Use stillwater's `Validation::Success(v)` and `Validation::Failure(e)` constructors
+   - Alternatively use helper functions: `success(v)` and `failure(e)`
+   - Errors accumulate automatically via Validation's applicative instance using `.and()`
+   - Support mapping over successful values with `.map(f)`
+   - Use `.and_then()` for fail-fast dependent validations (not applicative)
 
 ### Non-Functional Requirements
 
@@ -84,6 +86,8 @@ Create the foundational error types and path tracking system that enables:
 - [ ] Unit tests cover path construction and formatting
 - [ ] Unit tests cover error combination via Semigroup
 - [ ] Integration with `Validation<T, SchemaErrors>` works correctly
+- [ ] Uses stillwater's `Validation::Success`/`Validation::Failure` constructors
+- [ ] Leverages stillwater's `.and()` for applicative error accumulation
 
 ## Technical Details
 

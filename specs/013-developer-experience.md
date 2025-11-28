@@ -84,13 +84,14 @@ Implement developer experience improvements:
 ```rust
 // src/test_helpers.rs
 
-/// Assert that validation result is valid
+/// Assert that validation result is successful
+/// Note: Consider using stillwater's built-in `assert_success!` macro as well
 #[macro_export]
 macro_rules! assert_valid {
     ($result:expr) => {
         match &$result {
-            $crate::Validation::Valid(_) => {}
-            $crate::Validation::Invalid(errors) => {
+            $crate::Validation::Success(_) => {}
+            $crate::Validation::Failure(errors) => {
                 panic!(
                     "Expected valid result, got {} error(s):\n{}",
                     errors.len(),
@@ -101,13 +102,14 @@ macro_rules! assert_valid {
     };
 }
 
-/// Assert that validation result is invalid
+/// Assert that validation result failed
+/// Note: Consider using stillwater's built-in `assert_failure!` macro as well
 #[macro_export]
 macro_rules! assert_invalid {
     ($result:expr) => {
         match &$result {
-            $crate::Validation::Invalid(_) => {}
-            $crate::Validation::Valid(v) => {
+            $crate::Validation::Failure(_) => {}
+            $crate::Validation::Success(v) => {
                 panic!(
                     "Expected invalid result, got valid: {:?}",
                     v
@@ -117,7 +119,7 @@ macro_rules! assert_invalid {
     };
     ($result:expr, $count:expr) => {
         match &$result {
-            $crate::Validation::Invalid(errors) => {
+            $crate::Validation::Failure(errors) => {
                 assert_eq!(
                     errors.len(),
                     $count,
@@ -127,7 +129,7 @@ macro_rules! assert_invalid {
                     $crate::test_helpers::format_errors(errors)
                 );
             }
-            $crate::Validation::Valid(v) => {
+            $crate::Validation::Success(v) => {
                 panic!(
                     "Expected invalid result with {} errors, got valid: {:?}",
                     $count,
@@ -482,7 +484,7 @@ fn test_user_validation() {
 
     assert_invalid!(result, 2);  // Expect 2 errors
 
-    if let Validation::Invalid(errors) = result {
+    if let Validation::Failure(errors) = result {
         assert_error_at!(errors, "email", "invalid_email");
         assert_error_at!(errors, "age", "min_value");
     }

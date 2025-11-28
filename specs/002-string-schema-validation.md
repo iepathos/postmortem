@@ -55,9 +55,10 @@ Implement a string schema type that:
    - Default messages are clear and actionable
 
 5. **Validation Behavior**
-   - Return `Validation::invalid` with type error if value is not a string
+   - Return `Validation::Failure` with type error if value is not a string
    - Accumulate all constraint violations (not just the first)
-   - Return `Validation::valid` with the validated string on success
+   - Return `Validation::Success` with the validated string on success
+   - Use stillwater's `success()`/`failure()` helper functions for convenience
 
 ### Non-Functional Requirements
 
@@ -149,10 +150,12 @@ impl StringSchema {
     }
 
     pub fn validate(&self, value: &Value, path: &JsonPath) -> Validation<String, SchemaErrors> {
+        use stillwater::validation::{success, failure};
+
         // First check if it's a string
         let s = match value.as_str() {
             Some(s) => s,
-            None => return Validation::invalid(SchemaErrors::single(
+            None => return failure(SchemaErrors::single(
                 SchemaError::new(path.clone(), "expected string")
                     .with_code("invalid_type")
                     .with_got(value_type_name(value))
@@ -167,9 +170,9 @@ impl StringSchema {
             .collect();
 
         if errors.is_empty() {
-            Validation::valid(s.to_string())
+            success(s.to_string())
         } else {
-            Validation::invalid(SchemaErrors::from_vec(errors).unwrap())
+            failure(SchemaErrors::from_vec(errors).unwrap())
         }
     }
 }
@@ -276,9 +279,9 @@ let email_like = Schema::string()
 
 // Validation
 let result = schema.validate(&json!("hello"), &JsonPath::root());
-assert!(result.is_valid());
+assert!(result.is_success());
 
 let result = schema.validate(&json!(""), &JsonPath::root());
-assert!(result.is_invalid());
+assert!(result.is_failure());
 // Error: "length must be at least 1, got 0"
 ```

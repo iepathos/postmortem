@@ -53,10 +53,11 @@ Implement an integer schema type that:
    - Custom message applies to the most recent constraint
 
 5. **Validation Behavior**
-   - Return type error if value is not an integer
+   - Return `Validation::Failure` with type error if value is not an integer
    - Reject floating point numbers (even 1.0)
    - Accumulate all constraint violations
-   - Return validated i64 on success
+   - Return `Validation::Success` with validated i64 on success
+   - Use stillwater's `success()`/`failure()` helper functions
 
 ### Non-Functional Requirements
 
@@ -162,11 +163,13 @@ impl IntegerSchema {
     }
 
     pub fn validate(&self, value: &Value, path: &JsonPath) -> Validation<i64, SchemaErrors> {
+        use stillwater::validation::{success, failure};
+
         // Check for integer (not float)
         let n = match value {
             Value::Number(n) if n.is_i64() => n.as_i64().unwrap(),
             Value::Number(n) if n.is_f64() => {
-                return Validation::invalid(SchemaErrors::single(
+                return failure(SchemaErrors::single(
                     SchemaError::new(path.clone(), "expected integer, got float")
                         .with_code("invalid_type")
                         .with_got("float")
@@ -174,7 +177,7 @@ impl IntegerSchema {
                 ))
             }
             _ => {
-                return Validation::invalid(SchemaErrors::single(
+                return failure(SchemaErrors::single(
                     SchemaError::new(path.clone(), "expected integer")
                         .with_code("invalid_type")
                         .with_got(value_type_name(value))
@@ -190,9 +193,9 @@ impl IntegerSchema {
             .collect();
 
         if errors.is_empty() {
-            Validation::valid(n)
+            success(n)
         } else {
-            Validation::invalid(SchemaErrors::from_vec(errors).unwrap())
+            failure(SchemaErrors::from_vec(errors).unwrap())
         }
     }
 }
@@ -301,9 +304,9 @@ let limit_schema = Schema::integer()
 
 // Validation
 let result = age_schema.validate(&json!(25), &JsonPath::root());
-assert!(result.is_valid());
+assert!(result.is_success());
 
 let result = age_schema.validate(&json!(-5), &JsonPath::root());
-assert!(result.is_invalid());
+assert!(result.is_failure());
 // Errors: "must be non-negative", "age must be between 0 and 150"
 ```
