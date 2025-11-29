@@ -43,6 +43,9 @@ pub mod registry;
 pub mod schema;
 pub mod validation;
 
+#[cfg(feature = "effect")]
+pub mod effect;
+
 pub use error::{SchemaError, SchemaErrors};
 pub use path::{JsonPath, PathSegment};
 pub use registry::{RegistryError, SchemaRegistry};
