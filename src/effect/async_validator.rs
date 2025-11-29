@@ -20,6 +20,7 @@
 //! integration with custom validation logic that needs access to environment
 //! dependencies like databases or external APIs.
 
+use rayon::prelude::*;
 use serde_json::Value;
 use stillwater::Validation;
 
@@ -146,6 +147,70 @@ impl<E> AsyncStringSchema<E> {
                         all_errors.extend(errors.into_iter());
                     }
                 }
+
+                if all_errors.is_empty() {
+                    Validation::Success(validated)
+                } else {
+                    Validation::Failure(SchemaErrors::from_vec(all_errors))
+                }
+            }
+        }
+    }
+
+    /// Validates a value with both sync and async validators, running async validators in parallel.
+    ///
+    /// The validation process:
+    /// 1. Runs sync validators first
+    /// 2. If sync fails, returns those errors immediately
+    /// 3. If sync passes, runs all async validators in parallel using rayon
+    /// 4. Accumulates errors from all async validators
+    ///
+    /// This method is useful when you have multiple independent async validators
+    /// that can be executed concurrently for better performance.
+    ///
+    /// # Example
+    ///
+    /// ```rust,ignore
+    /// use postmortem::Schema;
+    /// use postmortem::effect::AsyncStringSchema;
+    ///
+    /// let schema = AsyncStringSchema::new(Schema::string().min_len(3))
+    ///     .async_custom(UniqueEmailValidator::new())
+    ///     .async_custom(EmailDomainValidator::new());
+    ///
+    /// let result = schema.validate_with_env_parallel(&json!("test@example.com"), &JsonPath::root(), &env);
+    /// ```
+    pub fn validate_with_env_parallel(
+        &self,
+        value: &Value,
+        path: &JsonPath,
+        env: &E,
+    ) -> Validation<String, SchemaErrors>
+    where
+        E: Sync,
+    {
+        // Run sync validation first
+        let sync_result = self.sync_schema.validate(value, path);
+
+        match sync_result {
+            Validation::Failure(errors) => {
+                // If sync fails, return those errors
+                Validation::Failure(errors)
+            }
+            Validation::Success(validated) => {
+                // Run async validators in parallel
+                let all_errors: Vec<_> = self
+                    .async_validators
+                    .par_iter()
+                    .filter_map(|validator| {
+                        let result = validator.validate_async(value, path, env);
+                        match result {
+                            Validation::Failure(errors) => Some(errors),
+                            Validation::Success(_) => None,
+                        }
+                    })
+                    .flatten()
+                    .collect();
 
                 if all_errors.is_empty() {
                     Validation::Success(validated)
@@ -285,6 +350,67 @@ mod tests {
 
         let env = TestEnv;
         let result = schema.validate_with_env(&json!("hello"), &JsonPath::root(), &env);
+
+        assert!(result.is_failure());
+        if let Validation::Failure(errors) = result {
+            assert_eq!(errors.len(), 2);
+        }
+    }
+
+    #[test]
+    fn test_parallel_async_validator_pass() {
+        let schema = Schema::string()
+            .min_len(3)
+            .async_custom(AlwaysPassValidator)
+            .async_custom(AlwaysPassValidator);
+
+        let env = TestEnv;
+        let result = schema.validate_with_env_parallel(&json!("hello"), &JsonPath::root(), &env);
+
+        assert!(result.is_success());
+    }
+
+    #[test]
+    fn test_parallel_async_validator_fail() {
+        let schema = Schema::string()
+            .min_len(3)
+            .async_custom(AlwaysFailValidator {
+                message: "async validation failed".to_string(),
+            });
+
+        let env = TestEnv;
+        let result = schema.validate_with_env_parallel(&json!("hello"), &JsonPath::root(), &env);
+
+        assert!(result.is_failure());
+    }
+
+    #[test]
+    fn test_parallel_sync_fail_skips_async() {
+        let schema = Schema::string()
+            .min_len(10)
+            .async_custom(AlwaysPassValidator);
+
+        let env = TestEnv;
+        let result = schema.validate_with_env_parallel(&json!("hi"), &JsonPath::root(), &env);
+
+        // Should fail on sync validation, not reach async
+        assert!(result.is_failure());
+    }
+
+    #[test]
+    fn test_parallel_multiple_async_validators() {
+        let schema = Schema::string()
+            .min_len(3)
+            .async_custom(AlwaysFailValidator {
+                message: "first error".to_string(),
+            })
+            .async_custom(AlwaysFailValidator {
+                message: "second error".to_string(),
+            })
+            .async_custom(AlwaysPassValidator);
+
+        let env = TestEnv;
+        let result = schema.validate_with_env_parallel(&json!("hello"), &JsonPath::root(), &env);
 
         assert!(result.is_failure());
         if let Validation::Failure(errors) = result {
