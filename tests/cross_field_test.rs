@@ -543,7 +543,7 @@ fn test_skip_cross_field_on_errors_disabled() {
     assert!(result.is_failure());
     // Should have field error
     let errors = unwrap_failure(result);
-    assert!(errors.with_code("min_length").len() > 0);
+    assert!(!errors.with_code("min_length").is_empty());
 }
 
 #[test]
@@ -569,8 +569,8 @@ fn test_cross_field_error_accumulation() {
     assert!(result.is_failure());
     let errors = unwrap_failure(result);
     assert_eq!(errors.len(), 2);
-    assert!(errors.with_code("fields_not_equal").len() > 0);
-    assert!(errors.with_code("field_not_less_than").len() > 0);
+    assert!(!errors.with_code("fields_not_equal").is_empty());
+    assert!(!errors.with_code("field_not_less_than").is_empty());
 }
 
 #[test]

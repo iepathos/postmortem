@@ -18,8 +18,9 @@ use super::traits::SchemaLike;
 ///
 /// A cross-field validator receives the validated object (after field validation)
 /// and the current path, returning a validation result.
-type CrossFieldValidator =
-    Box<dyn Fn(&ValidatedObject, &JsonPath) -> Validation<(), SchemaErrors> + Send + Sync + 'static>;
+type CrossFieldValidator = Box<
+    dyn Fn(&ValidatedObject, &JsonPath) -> Validation<(), SchemaErrors> + Send + Sync + 'static,
+>;
 
 /// Represents an object that has passed field-level validation.
 ///
@@ -392,11 +393,7 @@ impl ObjectSchema {
     ///     .optional("phone", Schema::string())
     ///     .mutually_exclusive("email", "phone");
     /// ```
-    pub fn mutually_exclusive(
-        self,
-        field1: impl Into<String>,
-        field2: impl Into<String>,
-    ) -> Self {
+    pub fn mutually_exclusive(self, field1: impl Into<String>, field2: impl Into<String>) -> Self {
         let field1 = field1.into();
         let field2 = field2.into();
 
@@ -568,11 +565,7 @@ impl ObjectSchema {
     ///     .field("max", Schema::integer())
     ///     .field_less_or_equal("min", "max");
     /// ```
-    pub fn field_less_or_equal(
-        self,
-        field1: impl Into<String>,
-        field2: impl Into<String>,
-    ) -> Self {
+    pub fn field_less_or_equal(self, field1: impl Into<String>, field2: impl Into<String>) -> Self {
         let field1 = field1.into();
         let field2 = field2.into();
 
