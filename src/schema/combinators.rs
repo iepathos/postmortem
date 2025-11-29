@@ -30,11 +30,12 @@
 //! ]);
 //! ```
 
-use serde_json::Value;
+use serde_json::{json, Value};
 use std::sync::Arc;
 use stillwater::Validation;
 
 use crate::error::{SchemaError, SchemaErrors};
+use crate::interop::ToJsonSchema;
 use crate::path::JsonPath;
 use crate::schema::traits::{SchemaLike, ValueValidator};
 use crate::validation::ValidationContext;
@@ -393,6 +394,36 @@ impl SchemaLike for CombinatorSchema {
             }
             CombinatorSchema::Optional { validator, .. } => {
                 validator.collect_refs(refs);
+            }
+        }
+    }
+}
+
+impl ToJsonSchema for CombinatorSchema {
+    fn to_json_schema(&self) -> Value {
+        match self {
+            CombinatorSchema::OneOf { validators, .. } => {
+                json!({
+                    "oneOf": validators.iter().map(|v| v.to_json_schema()).collect::<Vec<_>>()
+                })
+            }
+            CombinatorSchema::AnyOf { validators, .. } => {
+                json!({
+                    "anyOf": validators.iter().map(|v| v.to_json_schema()).collect::<Vec<_>>()
+                })
+            }
+            CombinatorSchema::AllOf { validators, .. } => {
+                json!({
+                    "allOf": validators.iter().map(|v| v.to_json_schema()).collect::<Vec<_>>()
+                })
+            }
+            CombinatorSchema::Optional { validator, .. } => {
+                json!({
+                    "oneOf": [
+                        json!({ "type": "null" }),
+                        validator.to_json_schema()
+                    ]
+                })
             }
         }
     }

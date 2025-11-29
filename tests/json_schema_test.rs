@@ -1,4 +1,4 @@
-use postmortem::{Schema, ToJsonSchema};
+use postmortem::{Schema, SchemaRegistry, ToJsonSchema};
 use serde_json::json;
 
 #[test]
@@ -205,4 +205,141 @@ fn test_generated_schema_is_valid_json() {
     // Should roundtrip
     let deserialized: serde_json::Value = serde_json::from_str(&serialized).unwrap();
     assert_eq!(json_schema, deserialized);
+}
+
+#[test]
+fn test_object_schema_to_json_schema() {
+    let schema = Schema::object()
+        .field("name", Schema::string().min_len(1))
+        .field("age", Schema::integer().positive())
+        .optional("email", Schema::string().email());
+
+    let json_schema = schema.to_json_schema();
+
+    assert_eq!(json_schema["type"], "object");
+    assert_eq!(json_schema["properties"]["name"]["type"], "string");
+    assert_eq!(json_schema["properties"]["name"]["minLength"], 1);
+    assert_eq!(json_schema["properties"]["age"]["type"], "integer");
+    assert_eq!(json_schema["properties"]["age"]["exclusiveMinimum"], 0);
+    assert_eq!(json_schema["properties"]["email"]["type"], "string");
+    assert_eq!(json_schema["properties"]["email"]["format"], "email");
+    assert_eq!(json_schema["required"], json!(["name", "age"]));
+}
+
+#[test]
+fn test_object_schema_with_additional_properties_false() {
+    let schema = Schema::object()
+        .field("name", Schema::string())
+        .additional_properties(false);
+
+    let json_schema = schema.to_json_schema();
+
+    assert_eq!(json_schema["type"], "object");
+    assert_eq!(json_schema["additionalProperties"], false);
+}
+
+#[test]
+fn test_object_schema_with_additional_properties_schema() {
+    let schema = Schema::object()
+        .field("name", Schema::string())
+        .additional_properties(Schema::integer());
+
+    let json_schema = schema.to_json_schema();
+
+    assert_eq!(json_schema["type"], "object");
+    assert_eq!(json_schema["additionalProperties"]["type"], "integer");
+}
+
+#[test]
+fn test_combinator_schema_one_of() {
+    use postmortem::ValueValidator;
+    let schema = Schema::one_of(vec![
+        Box::new(Schema::string().min_len(1)) as Box<dyn ValueValidator>,
+        Box::new(Schema::integer().positive()) as Box<dyn ValueValidator>,
+    ]);
+
+    let json_schema = ToJsonSchema::to_json_schema(&schema);
+
+    assert!(json_schema["oneOf"].is_array());
+    assert_eq!(json_schema["oneOf"].as_array().unwrap().len(), 2);
+    assert_eq!(json_schema["oneOf"][0]["type"], "string");
+    assert_eq!(json_schema["oneOf"][1]["type"], "integer");
+}
+
+#[test]
+fn test_combinator_schema_any_of() {
+    use postmortem::ValueValidator;
+    let schema = Schema::any_of(vec![
+        Box::new(Schema::string()) as Box<dyn ValueValidator>,
+        Box::new(Schema::integer()) as Box<dyn ValueValidator>,
+    ]);
+
+    let json_schema = ToJsonSchema::to_json_schema(&schema);
+
+    assert!(json_schema["anyOf"].is_array());
+    assert_eq!(json_schema["anyOf"].as_array().unwrap().len(), 2);
+}
+
+#[test]
+fn test_combinator_schema_all_of() {
+    use postmortem::ValueValidator;
+    let schema = Schema::all_of(vec![
+        Box::new(Schema::string().min_len(5)) as Box<dyn ValueValidator>,
+        Box::new(Schema::string().max_len(100)) as Box<dyn ValueValidator>,
+    ]);
+
+    let json_schema = ToJsonSchema::to_json_schema(&schema);
+
+    assert!(json_schema["allOf"].is_array());
+    assert_eq!(json_schema["allOf"].as_array().unwrap().len(), 2);
+}
+
+#[test]
+fn test_registry_to_json_schema() {
+    let registry = SchemaRegistry::new();
+    registry.register("UserId", Schema::integer().positive()).unwrap();
+    registry.register("Email", Schema::string().email()).unwrap();
+
+    let json_schema = registry.to_json_schema();
+
+    assert_eq!(json_schema["$schema"], "https://json-schema.org/draft/2020-12/schema");
+    assert!(json_schema["$defs"].is_object());
+    assert_eq!(json_schema["$defs"]["UserId"]["type"], "integer");
+    assert_eq!(json_schema["$defs"]["Email"]["type"], "string");
+    assert_eq!(json_schema["$defs"]["Email"]["format"], "email");
+}
+
+#[test]
+fn test_registry_export_schema() {
+    let registry = SchemaRegistry::new();
+    registry.register("UserId", Schema::integer().positive()).unwrap();
+    registry.register("User", Schema::object()
+        .field("id", Schema::ref_("UserId"))
+        .field("email", Schema::string().email())
+    ).unwrap();
+
+    let user_schema = registry.export_schema("User").unwrap();
+
+    assert_eq!(user_schema["$schema"], "https://json-schema.org/draft/2020-12/schema");
+    assert_eq!(user_schema["type"], "object");
+    assert_eq!(user_schema["properties"]["id"]["$ref"], "#/$defs/UserId");
+    assert_eq!(user_schema["properties"]["email"]["type"], "string");
+    assert!(user_schema["$defs"]["UserId"].is_object());
+}
+
+#[test]
+fn test_nested_object_schema() {
+    let address_schema = Schema::object()
+        .field("street", Schema::string().min_len(1))
+        .field("city", Schema::string().min_len(1));
+
+    let user_schema = Schema::object()
+        .field("name", Schema::string())
+        .field("address", address_schema);
+
+    let json_schema = user_schema.to_json_schema();
+
+    assert_eq!(json_schema["type"], "object");
+    assert_eq!(json_schema["properties"]["address"]["type"], "object");
+    assert_eq!(json_schema["properties"]["address"]["properties"]["street"]["type"], "string");
 }

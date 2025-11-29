@@ -7,6 +7,7 @@ use serde_json::Value;
 use stillwater::Validation;
 
 use crate::error::SchemaErrors;
+use crate::interop::ToJsonSchema;
 use crate::path::JsonPath;
 
 /// A trait for schema types that can validate JSON values.
@@ -162,12 +163,18 @@ pub trait ValueValidator: Send + Sync {
     fn collect_refs(&self, _refs: &mut Vec<String>) {
         // Most schemas have no references
     }
+
+    /// Converts this schema to JSON Schema format.
+    ///
+    /// This enables ObjectSchema and other container schemas to export their
+    /// field schemas to JSON Schema even when stored as trait objects.
+    fn to_json_schema(&self) -> Value;
 }
 
 /// Blanket implementation of `ValueValidator` for all `SchemaLike` types.
 ///
 /// This allows any schema to be used as a `ValueValidator` without additional code.
-impl<S: SchemaLike> ValueValidator for S {
+impl<S: SchemaLike + ToJsonSchema> ValueValidator for S {
     fn validate_value(&self, value: &Value, path: &JsonPath) -> Validation<Value, SchemaErrors> {
         self.validate_to_value(value, path)
     }
@@ -183,5 +190,9 @@ impl<S: SchemaLike> ValueValidator for S {
 
     fn collect_refs(&self, refs: &mut Vec<String>) {
         SchemaLike::collect_refs(self, refs);
+    }
+
+    fn to_json_schema(&self) -> Value {
+        ToJsonSchema::to_json_schema(self)
     }
 }

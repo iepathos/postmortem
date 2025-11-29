@@ -5,11 +5,12 @@
 //! and cross-field validation.
 
 use indexmap::IndexMap;
-use serde_json::{Map, Value};
+use serde_json::{json, Map, Value};
 use std::collections::HashMap;
 use stillwater::Validation;
 
 use crate::error::{SchemaError, SchemaErrors};
+use crate::interop::ToJsonSchema;
 use crate::path::JsonPath;
 
 use super::traits::SchemaLike;
@@ -46,7 +47,7 @@ impl ValidatedObject {
 
 /// Definition of a field within an object schema.
 struct FieldDef {
-    schema: Box<dyn SchemaLike<Output = Value>>,
+    schema: Box<dyn super::traits::ValueValidator>,
     required: bool,
     default: Option<Value>,
 }
@@ -58,7 +59,7 @@ enum AdditionalProperties {
     /// Reject unknown properties.
     Deny,
     /// Validate unknown properties against a schema.
-    Validate(Box<dyn SchemaLike<Output = Value>>),
+    Validate(Box<dyn super::traits::ValueValidator>),
 }
 
 /// A schema for validating JSON objects.
@@ -126,7 +127,7 @@ impl ObjectSchema {
     /// ```
     pub fn field<S>(mut self, name: impl Into<String>, schema: S) -> Self
     where
-        S: SchemaLike + 'static,
+        S: SchemaLike + ToJsonSchema + 'static,
     {
         let name = name.into();
         self.fields.insert(
@@ -160,7 +161,7 @@ impl ObjectSchema {
     /// ```
     pub fn optional<S>(mut self, name: impl Into<String>, schema: S) -> Self
     where
-        S: SchemaLike + 'static,
+        S: SchemaLike + ToJsonSchema + 'static,
     {
         let name = name.into();
         self.fields.insert(
@@ -194,7 +195,7 @@ impl ObjectSchema {
     /// ```
     pub fn default<S>(mut self, name: impl Into<String>, schema: S, default: Value) -> Self
     where
-        S: SchemaLike + 'static,
+        S: SchemaLike + ToJsonSchema + 'static,
     {
         let name = name.into();
         self.fields.insert(
@@ -648,7 +649,7 @@ impl ObjectSchema {
 
             match obj.get(name) {
                 Some(field_value) => {
-                    match field_def.schema.validate_to_value(field_value, &field_path) {
+                    match field_def.schema.validate_value(field_value, &field_path) {
                         Validation::Success(v) => {
                             validated.insert(name.clone(), v);
                         }
@@ -692,7 +693,7 @@ impl ObjectSchema {
                         );
                     }
                     AdditionalProperties::Validate(schema) => {
-                        match schema.validate_to_value(value, &field_path) {
+                        match schema.validate_value(value, &field_path) {
                             Validation::Success(v) => {
                                 validated.insert(key.clone(), v);
                             }
@@ -778,7 +779,7 @@ impl SchemaLike for ObjectSchema {
 
             match obj.get(name) {
                 Some(field_value) => {
-                    match field_def.schema.validate_to_value_with_context(
+                    match field_def.schema.validate_value_with_context(
                         field_value,
                         &field_path,
                         context,
@@ -826,7 +827,7 @@ impl SchemaLike for ObjectSchema {
                         );
                     }
                     AdditionalProperties::Validate(schema) => {
-                        match schema.validate_to_value_with_context(value, &field_path, context) {
+                        match schema.validate_value_with_context(value, &field_path, context) {
                             Validation::Success(v) => {
                                 validated.insert(key.clone(), v);
                             }
@@ -885,13 +886,13 @@ impl SchemaLike for ObjectSchema {
     }
 }
 
-/// A wrapper to adapt any `SchemaLike` to produce `Value` output.
+/// A wrapper to adapt any `SchemaLike` to be a `ValueValidator`.
 ///
-/// This is necessary because we store field schemas as `Box<dyn SchemaLike<Output = Value>>`
-/// but the actual schemas have different output types.
+/// This is necessary because we store field schemas as `Box<dyn ValueValidator>`
+/// but accept `SchemaLike` in the builder methods.
 struct SchemaWrapper<S>(S);
 
-impl<S: SchemaLike> SchemaLike for SchemaWrapper<S> {
+impl<S: SchemaLike + ToJsonSchema> SchemaLike for SchemaWrapper<S> {
     type Output = Value;
 
     fn validate(&self, value: &Value, path: &JsonPath) -> Validation<Value, SchemaErrors> {
@@ -925,6 +926,12 @@ impl<S: SchemaLike> SchemaLike for SchemaWrapper<S> {
     }
 }
 
+impl<S: SchemaLike + ToJsonSchema> ToJsonSchema for SchemaWrapper<S> {
+    fn to_json_schema(&self) -> Value {
+        self.0.to_json_schema()
+    }
+}
+
 /// A type that can be converted into an `AdditionalProperties` setting.
 ///
 /// This allows `additional_properties()` to accept different types:
@@ -942,7 +949,7 @@ impl From<bool> for AdditionalPropertiesSetting {
     }
 }
 
-impl<S: SchemaLike + 'static> From<S> for AdditionalPropertiesSetting {
+impl<S: SchemaLike + ToJsonSchema + 'static> From<S> for AdditionalPropertiesSetting {
     fn from(schema: S) -> Self {
         AdditionalPropertiesSetting(AdditionalProperties::Validate(Box::new(SchemaWrapper(
             schema,
@@ -959,6 +966,41 @@ fn value_type_name(value: &Value) -> &'static str {
         Value::String(_) => "string",
         Value::Array(_) => "array",
         Value::Object(_) => "object",
+    }
+}
+
+impl ToJsonSchema for ObjectSchema {
+    fn to_json_schema(&self) -> Value {
+        let mut properties = serde_json::Map::new();
+        let mut required = Vec::new();
+
+        for (name, field_def) in &self.fields {
+            properties.insert(name.clone(), field_def.schema.to_json_schema());
+            if field_def.required {
+                required.push(name.clone());
+            }
+        }
+
+        let mut schema = json!({
+            "type": "object",
+            "properties": properties,
+        });
+
+        if !required.is_empty() {
+            schema["required"] = json!(required);
+        }
+
+        match &self.additional_properties {
+            AdditionalProperties::Deny => {
+                schema["additionalProperties"] = json!(false);
+            }
+            AdditionalProperties::Allow => {}
+            AdditionalProperties::Validate(s) => {
+                schema["additionalProperties"] = s.to_json_schema();
+            }
+        }
+
+        schema
     }
 }
 
