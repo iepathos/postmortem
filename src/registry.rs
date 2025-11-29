@@ -4,7 +4,7 @@
 //! and enables schema references to be resolved during validation.
 
 use parking_lot::RwLock;
-use serde_json::Value;
+use serde_json::{json, Value};
 use std::collections::HashMap;
 use std::sync::Arc;
 
@@ -217,6 +217,75 @@ impl SchemaRegistry {
 
         let context = ValidationContext::new(Arc::new(self.clone()), self.max_depth);
         Ok(schema.validate_value_with_context(value, &JsonPath::root(), &context))
+    }
+
+    /// Exports all registered schemas as a JSON Schema document with $defs.
+    ///
+    /// Returns a JSON Schema document following draft 2020-12 with all registered
+    /// schemas under the `$defs` key.
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// use postmortem::{SchemaRegistry, Schema};
+    ///
+    /// let registry = SchemaRegistry::new();
+    /// registry.register("UserId", Schema::integer().positive()).unwrap();
+    /// registry.register("Email", Schema::string().email()).unwrap();
+    ///
+    /// let json_schema = registry.to_json_schema();
+    /// // Returns:
+    /// // {
+    /// //   "$schema": "https://json-schema.org/draft/2020-12/schema",
+    /// //   "$defs": {
+    /// //     "UserId": { "type": "integer", "exclusiveMinimum": 0 },
+    /// //     "Email": { "type": "string", "format": "email" }
+    /// //   }
+    /// // }
+    /// ```
+    pub fn to_json_schema(&self) -> Value {
+        let schemas = self.schemas.read();
+        let mut defs = serde_json::Map::new();
+
+        for (name, schema) in schemas.iter() {
+            defs.insert(name.clone(), schema.to_json_schema());
+        }
+
+        json!({
+            "$schema": "https://json-schema.org/draft/2020-12/schema",
+            "$defs": defs
+        })
+    }
+
+    /// Exports a single schema as a standalone JSON Schema document.
+    ///
+    /// Returns a JSON Schema document for the named schema, including all
+    /// referenced schemas under `$defs`. Returns `None` if the schema doesn't exist.
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// use postmortem::{SchemaRegistry, Schema};
+    ///
+    /// let registry = SchemaRegistry::new();
+    /// registry.register("UserId", Schema::integer().positive()).unwrap();
+    /// registry.register("User", Schema::object()
+    ///     .field("id", Schema::ref_("UserId"))
+    ///     .field("email", Schema::string().email())
+    /// ).unwrap();
+    ///
+    /// let user_schema = registry.export_schema("User").unwrap();
+    /// // Returns a complete JSON Schema with User schema and UserId in $defs
+    /// ```
+    pub fn export_schema(&self, name: &str) -> Option<Value> {
+        let schema = self.get(name)?;
+        let base = self.to_json_schema();
+
+        let mut result = schema.to_json_schema();
+        result["$schema"] = json!("https://json-schema.org/draft/2020-12/schema");
+        result["$defs"] = base["$defs"].clone();
+
+        Some(result)
     }
 }
 

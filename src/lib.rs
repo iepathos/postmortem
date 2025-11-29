@@ -38,6 +38,7 @@
 //! ```
 
 pub mod error;
+pub mod interop;
 pub mod path;
 pub mod registry;
 pub mod schema;
@@ -47,6 +48,7 @@ pub mod validation;
 pub mod effect;
 
 pub use error::{SchemaError, SchemaErrors};
+pub use interop::ToJsonSchema;
 pub use path::{JsonPath, PathSegment};
 pub use registry::{RegistryError, SchemaRegistry};
 pub use schema::{

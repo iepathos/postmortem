@@ -3,10 +3,11 @@
 //! This module provides [`RefSchema`] which represents a reference to a named schema
 //! in a registry. References enable schema reuse and recursive structures.
 
-use serde_json::Value;
+use serde_json::{json, Value};
 use stillwater::Validation;
 
 use crate::error::{SchemaError, SchemaErrors};
+use crate::interop::ToJsonSchema;
 use crate::path::JsonPath;
 use crate::schema::SchemaLike;
 use crate::validation::ValidationContext;
@@ -134,5 +135,13 @@ impl SchemaLike for RefSchema {
 
     fn collect_refs(&self, refs: &mut Vec<String>) {
         refs.push(self.name.clone());
+    }
+}
+
+impl ToJsonSchema for RefSchema {
+    fn to_json_schema(&self) -> Value {
+        json!({
+            "$ref": format!("#/$defs/{}", self.name)
+        })
     }
 }
