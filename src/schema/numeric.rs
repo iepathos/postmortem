@@ -3,11 +3,12 @@
 //! This module provides [`IntegerSchema`] for validating integer values with
 //! constraints like minimum/maximum value and sign requirements.
 
-use serde_json::Value;
+use serde_json::{json, Value};
 use std::ops::RangeInclusive;
 use stillwater::Validation;
 
 use crate::error::{SchemaError, SchemaErrors};
+use crate::interop::ToJsonSchema;
 use crate::path::JsonPath;
 
 use super::traits::SchemaLike;
@@ -350,6 +351,34 @@ impl SchemaLike for IntegerSchema {
 
     fn validate_to_value(&self, value: &Value, path: &JsonPath) -> Validation<Value, SchemaErrors> {
         self.validate(value, path).map(|n| Value::Number(n.into()))
+    }
+}
+
+impl ToJsonSchema for IntegerSchema {
+    fn to_json_schema(&self) -> Value {
+        let mut schema = json!({ "type": "integer" });
+
+        for constraint in &self.constraints {
+            match constraint {
+                IntegerConstraint::Min { value, .. } => {
+                    schema["minimum"] = json!(value);
+                }
+                IntegerConstraint::Max { value, .. } => {
+                    schema["maximum"] = json!(value);
+                }
+                IntegerConstraint::Positive { .. } => {
+                    schema["exclusiveMinimum"] = json!(0);
+                }
+                IntegerConstraint::NonNegative { .. } => {
+                    schema["minimum"] = json!(0);
+                }
+                IntegerConstraint::Negative { .. } => {
+                    schema["exclusiveMaximum"] = json!(0);
+                }
+            }
+        }
+
+        schema
     }
 }
 

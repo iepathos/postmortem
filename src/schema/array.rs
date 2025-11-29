@@ -3,11 +3,12 @@
 //! This module provides [`ArraySchema`] for validating arrays with item schemas,
 //! length constraints, and uniqueness requirements.
 
-use serde_json::Value;
+use serde_json::{json, Value};
 use std::collections::HashMap;
 use stillwater::Validation;
 
 use crate::error::{SchemaError, SchemaErrors};
+use crate::interop::ToJsonSchema;
 use crate::path::JsonPath;
 
 use super::traits::SchemaLike;
@@ -491,6 +492,33 @@ impl<S: SchemaLike> SchemaLike for ArraySchema<S> {
 
     fn collect_refs(&self, refs: &mut Vec<String>) {
         self.item_schema.collect_refs(refs);
+    }
+}
+
+impl<S: SchemaLike + ToJsonSchema> ToJsonSchema for ArraySchema<S> {
+    fn to_json_schema(&self) -> Value {
+        let mut schema = json!({
+            "type": "array",
+            "items": self.item_schema.to_json_schema(),
+        });
+
+        for constraint in &self.constraints {
+            match constraint {
+                ArrayConstraint::MinLength { min, .. } => {
+                    schema["minItems"] = json!(min);
+                }
+                ArrayConstraint::MaxLength { max, .. } => {
+                    schema["maxItems"] = json!(max);
+                }
+                ArrayConstraint::Unique { .. } => {
+                    schema["uniqueItems"] = json!(true);
+                }
+                // UniqueBy doesn't have a direct JSON Schema equivalent
+                _ => {}
+            }
+        }
+
+        schema
     }
 }
 

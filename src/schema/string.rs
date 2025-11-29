@@ -4,11 +4,12 @@
 //! constraints like minimum/maximum length and regex patterns.
 
 use regex::Regex;
-use serde_json::Value;
+use serde_json::{json, Value};
 use std::sync::Arc;
 use stillwater::Validation;
 
 use crate::error::{SchemaError, SchemaErrors};
+use crate::interop::ToJsonSchema;
 use crate::path::JsonPath;
 
 use super::traits::SchemaLike;
@@ -27,6 +28,22 @@ enum Format {
     Ip,
     Ipv4,
     Ipv6,
+}
+
+impl Format {
+    /// Converts format to JSON Schema format string.
+    fn to_json_schema_format(&self) -> &'static str {
+        match self {
+            Format::Email => "email",
+            Format::Url => "uri",
+            Format::Uuid => "uuid",
+            Format::Date => "date",
+            Format::DateTime => "date-time",
+            Format::Ip => "ipv4", // JSON Schema doesn't have generic ip
+            Format::Ipv4 => "ipv4",
+            Format::Ipv6 => "ipv6",
+        }
+    }
 }
 
 /// String transformation types.
@@ -456,6 +473,37 @@ impl SchemaLike for StringSchema {
 
     fn validate_to_value(&self, value: &Value, path: &JsonPath) -> Validation<Value, SchemaErrors> {
         self.validate(value, path).map(Value::String)
+    }
+}
+
+impl ToJsonSchema for StringSchema {
+    fn to_json_schema(&self) -> Value {
+        let mut schema = json!({ "type": "string" });
+
+        for constraint in &self.constraints {
+            match constraint {
+                StringConstraint::MinLength { min, .. } => {
+                    schema["minLength"] = json!(min);
+                }
+                StringConstraint::MaxLength { max, .. } => {
+                    schema["maxLength"] = json!(max);
+                }
+                StringConstraint::Pattern { pattern_str, .. } => {
+                    schema["pattern"] = json!(pattern_str);
+                }
+                StringConstraint::Format { format, .. } => {
+                    schema["format"] = json!(format.to_json_schema_format());
+                }
+                StringConstraint::OneOf { values, .. } => {
+                    schema["enum"] = json!(values);
+                }
+                // StartsWith, EndsWith, Contains don't have direct JSON Schema equivalents
+                // They could be represented as patterns, but we'll skip them for now
+                _ => {}
+            }
+        }
+
+        schema
     }
 }
 
