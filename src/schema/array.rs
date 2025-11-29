@@ -367,6 +367,131 @@ impl<S: SchemaLike> SchemaLike for ArraySchema<S> {
     fn validate_to_value(&self, value: &Value, path: &JsonPath) -> Validation<Value, SchemaErrors> {
         self.validate(value, path).map(Value::Array)
     }
+
+    fn validate_with_context(
+        &self,
+        value: &Value,
+        path: &JsonPath,
+        context: &crate::validation::ValidationContext,
+    ) -> Validation<Self::Output, SchemaErrors> {
+        // Check if it's an array
+        let arr = match value.as_array() {
+            Some(a) => a,
+            None => {
+                let message = self
+                    .type_error_message
+                    .clone()
+                    .unwrap_or_else(|| "expected array".to_string());
+                return Validation::Failure(SchemaErrors::single(
+                    SchemaError::new(path.clone(), message)
+                        .with_code("invalid_type")
+                        .with_got(value_type_name(value))
+                        .with_expected("array"),
+                ));
+            }
+        };
+
+        let mut errors = Vec::new();
+
+        // Check length constraints
+        for constraint in &self.constraints {
+            match constraint {
+                ArrayConstraint::MinLength { min, message } if arr.len() < *min => {
+                    let msg = message.clone().unwrap_or_else(|| {
+                        format!("array must have at least {} items, got {}", min, arr.len())
+                    });
+                    errors.push(
+                        SchemaError::new(path.clone(), msg)
+                            .with_code("min_length")
+                            .with_expected(format!("at least {} items", min))
+                            .with_got(format!("{} items", arr.len())),
+                    );
+                }
+                ArrayConstraint::MaxLength { max, message } if arr.len() > *max => {
+                    let msg = message.clone().unwrap_or_else(|| {
+                        format!("array must have at most {} items, got {}", max, arr.len())
+                    });
+                    errors.push(
+                        SchemaError::new(path.clone(), msg)
+                            .with_code("max_length")
+                            .with_expected(format!("at most {} items", max))
+                            .with_got(format!("{} items", arr.len())),
+                    );
+                }
+                _ => {}
+            }
+        }
+
+        // Validate each item with context (depth does not increment for array items)
+        let mut validated_items = Vec::with_capacity(arr.len());
+        for (index, item) in arr.iter().enumerate() {
+            let item_path = path.push_index(index);
+            match self
+                .item_schema
+                .validate_to_value_with_context(item, &item_path, context)
+            {
+                Validation::Success(v) => validated_items.push(v),
+                Validation::Failure(e) => errors.extend(e.into_iter()),
+            }
+        }
+
+        // Check uniqueness constraints
+        for constraint in &self.constraints {
+            match constraint {
+                ArrayConstraint::Unique { message } => {
+                    let duplicates = find_duplicates(arr, |v| v.clone());
+                    for indices in duplicates.values() {
+                        if indices.len() > 1 {
+                            let msg = message.clone().unwrap_or_else(|| {
+                                format!("duplicate value at indices {:?}", indices)
+                            });
+                            errors.push(
+                                SchemaError::new(path.clone(), msg)
+                                    .with_code("unique")
+                                    .with_got(format!("duplicates at indices {:?}", indices)),
+                            );
+                        }
+                    }
+                }
+                ArrayConstraint::UniqueBy { key_fn, message } => {
+                    let duplicates = find_duplicates(arr, key_fn);
+                    for indices in duplicates.values() {
+                        if indices.len() > 1 {
+                            let msg = message.clone().unwrap_or_else(|| {
+                                format!("duplicate key at indices {:?}", indices)
+                            });
+                            errors.push(
+                                SchemaError::new(path.clone(), msg)
+                                    .with_code("unique")
+                                    .with_got(format!("duplicates at indices {:?}", indices)),
+                            );
+                        }
+                    }
+                }
+                _ => {}
+            }
+        }
+
+        if errors.is_empty() {
+            Validation::Success(validated_items)
+        } else {
+            Validation::Failure(SchemaErrors::from_vec(errors))
+        }
+    }
+
+    fn validate_to_value_with_context(
+        &self,
+        value: &Value,
+        path: &JsonPath,
+        context: &crate::validation::ValidationContext,
+    ) -> Validation<Value, SchemaErrors> {
+        self.validate_with_context(value, path, context)
+            .map(Value::Array)
+    }
+
+    fn collect_refs(&self, refs: &mut Vec<String>) {
+        self.item_schema.collect_refs(refs);
+    }
 }
 
 /// Finds duplicate values in an array based on a key function.

@@ -745,6 +745,144 @@ impl SchemaLike for ObjectSchema {
     fn validate_to_value(&self, value: &Value, path: &JsonPath) -> Validation<Value, SchemaErrors> {
         self.validate(value, path).map(Value::Object)
     }
+
+    fn validate_with_context(
+        &self,
+        value: &Value,
+        path: &JsonPath,
+        context: &crate::validation::ValidationContext,
+    ) -> Validation<Self::Output, SchemaErrors> {
+        // Check if it's an object
+        let obj = match value.as_object() {
+            Some(o) => o,
+            None => {
+                let message = self
+                    .type_error_message
+                    .clone()
+                    .unwrap_or_else(|| "expected object".to_string());
+                return Validation::Failure(SchemaErrors::single(
+                    SchemaError::new(path.clone(), message)
+                        .with_code("invalid_type")
+                        .with_got(value_type_name(value))
+                        .with_expected("object"),
+                ));
+            }
+        };
+
+        let mut errors = Vec::new();
+        let mut validated = Map::new();
+
+        // Validate defined fields using context
+        for (name, field_def) in &self.fields {
+            let field_path = path.push_field(name);
+
+            match obj.get(name) {
+                Some(field_value) => {
+                    match field_def.schema.validate_to_value_with_context(
+                        field_value,
+                        &field_path,
+                        context,
+                    ) {
+                        Validation::Success(v) => {
+                            validated.insert(name.clone(), v);
+                        }
+                        Validation::Failure(e) => {
+                            errors.extend(e.into_iter());
+                        }
+                    }
+                }
+                None if field_def.required => {
+                    errors.push(
+                        SchemaError::new(
+                            field_path,
+                            format!("required field '{}' is missing", name),
+                        )
+                        .with_code("required")
+                        .with_expected("value"),
+                    );
+                }
+                None => {
+                    // Optional field - use default if provided
+                    if let Some(default) = &field_def.default {
+                        validated.insert(name.clone(), default.clone());
+                    }
+                }
+            }
+        }
+
+        // Handle additional properties
+        for (key, value) in obj {
+            if !self.fields.contains_key(key) {
+                let field_path = path.push_field(key);
+                match &self.additional_properties {
+                    AdditionalProperties::Allow => {
+                        // Allow and include in output
+                        validated.insert(key.clone(), value.clone());
+                    }
+                    AdditionalProperties::Deny => {
+                        errors.push(
+                            SchemaError::new(field_path, format!("unknown field '{}'", key))
+                                .with_code("additional_property"),
+                        );
+                    }
+                    AdditionalProperties::Validate(schema) => {
+                        match schema.validate_to_value_with_context(value, &field_path, context) {
+                            Validation::Success(v) => {
+                                validated.insert(key.clone(), v);
+                            }
+                            Validation::Failure(e) => {
+                                errors.extend(e.into_iter());
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // Run cross-field validation if configured
+        if !self.skip_on_field_errors || errors.is_empty() {
+            let validated_obj = ValidatedObject {
+                fields: validated
+                    .iter()
+                    .map(|(k, v)| (k.clone(), v.clone()))
+                    .collect(),
+            };
+
+            for validator in &self.cross_field_validators {
+                if let Validation::Failure(e) = validator(&validated_obj, path) {
+                    errors.extend(e.into_iter());
+                }
+            }
+        }
+
+        if errors.is_empty() {
+            Validation::Success(validated)
+        } else {
+            Validation::Failure(SchemaErrors::from_vec(errors))
+        }
+    }
+
+    fn validate_to_value_with_context(
+        &self,
+        value: &Value,
+        path: &JsonPath,
+        context: &crate::validation::ValidationContext,
+    ) -> Validation<Value, SchemaErrors> {
+        self.validate_with_context(value, path, context)
+            .map(Value::Object)
+    }
+
+    fn collect_refs(&self, refs: &mut Vec<String>) {
+        // Collect refs from all field schemas
+        for field_def in self.fields.values() {
+            field_def.schema.collect_refs(refs);
+        }
+
+        // Collect refs from additional properties schema if present
+        if let AdditionalProperties::Validate(schema) = &self.additional_properties {
+            schema.collect_refs(refs);
+        }
+    }
 }
 
 /// A wrapper to adapt any `SchemaLike` to produce `Value` output.
@@ -762,6 +900,28 @@ impl<S: SchemaLike> SchemaLike for SchemaWrapper<S> {
 
     fn validate_to_value(&self, value: &Value, path: &JsonPath) -> Validation<Value, SchemaErrors> {
         self.0.validate_to_value(value, path)
+    }
+
+    fn validate_with_context(
+        &self,
+        value: &Value,
+        path: &JsonPath,
+        context: &crate::validation::ValidationContext,
+    ) -> Validation<Value, SchemaErrors> {
+        self.0.validate_to_value_with_context(value, path, context)
+    }
+
+    fn validate_to_value_with_context(
+        &self,
+        value: &Value,
+        path: &JsonPath,
+        context: &crate::validation::ValidationContext,
+    ) -> Validation<Value, SchemaErrors> {
+        self.0.validate_to_value_with_context(value, path, context)
+    }
+
+    fn collect_refs(&self, refs: &mut Vec<String>) {
+        self.0.collect_refs(refs);
     }
 }
 

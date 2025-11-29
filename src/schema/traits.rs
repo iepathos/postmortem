@@ -45,6 +45,78 @@ pub trait SchemaLike: Send + Sync {
     /// This method allows schema types with different output types to be
     /// used uniformly in object schemas where all fields are stored as `Value`.
     fn validate_to_value(&self, value: &Value, path: &JsonPath) -> Validation<Value, SchemaErrors>;
+
+    /// Validates a value with registry context for schema reference resolution.
+    ///
+    /// This method is used when validating with a registry that contains named schemas.
+    /// The context provides access to the registry for resolving schema references
+    /// and tracks depth to prevent infinite loops in circular references.
+    ///
+    /// The default implementation ignores the context and delegates to `validate()`,
+    /// which preserves backward compatibility for schemas that don't use references.
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// use postmortem::{Schema, JsonPath};
+    /// use serde_json::json;
+    ///
+    /// // Most schemas work the same with or without context
+    /// let schema = Schema::string().min_len(1);
+    /// let result = schema.validate(&json!("hello"), &JsonPath::root());
+    /// assert!(result.is_success());
+    /// ```
+    fn validate_with_context(
+        &self,
+        value: &Value,
+        path: &JsonPath,
+        _context: &crate::validation::ValidationContext,
+    ) -> Validation<Self::Output, SchemaErrors> {
+        // Default: ignore context, delegate to existing validate()
+        self.validate(value, path)
+    }
+
+    /// Validates a value with context and returns the result as a `serde_json::Value`.
+    ///
+    /// This combines `validate_with_context` and `validate_to_value` for use in
+    /// container schemas where all fields must return `Value`.
+    ///
+    /// The default implementation delegates to `validate_to_value()` for backward compatibility.
+    fn validate_to_value_with_context(
+        &self,
+        value: &Value,
+        path: &JsonPath,
+        _context: &crate::validation::ValidationContext,
+    ) -> Validation<Value, SchemaErrors> {
+        // Default: ignore context, delegate to existing validate_to_value()
+        self.validate_to_value(value, path)
+    }
+
+    /// Collects all schema reference names used by this schema.
+    ///
+    /// This method traverses the schema structure and adds the names of all
+    /// referenced schemas to the provided vector. It's used by the registry
+    /// to validate that all references can be resolved.
+    ///
+    /// The default implementation does nothing, which is correct for schemas
+    /// that don't contain references. Container schemas (Object, Array) and
+    /// combinator schemas (AnyOf, AllOf, etc.) override this to traverse
+    /// their children.
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// use postmortem::{Schema, SchemaLike};
+    ///
+    /// // Most schemas have no references
+    /// let schema = Schema::string().min_len(1);
+    /// let mut refs = Vec::new();
+    /// schema.collect_refs(&mut refs);
+    /// assert_eq!(refs.len(), 0);
+    /// ```
+    fn collect_refs(&self, _refs: &mut Vec<String>) {
+        // Default: no references to collect
+    }
 }
 
 /// A type-erased trait for schemas that validate to JSON values.
@@ -71,6 +143,25 @@ pub trait SchemaLike: Send + Sync {
 pub trait ValueValidator: Send + Sync {
     /// Validates a value and returns the result as a `serde_json::Value`.
     fn validate_value(&self, value: &Value, path: &JsonPath) -> Validation<Value, SchemaErrors>;
+
+    /// Validates a value with context and returns the result as a `serde_json::Value`.
+    ///
+    /// Default implementation delegates to `validate_value()` for backward compatibility.
+    fn validate_value_with_context(
+        &self,
+        value: &Value,
+        path: &JsonPath,
+        _context: &crate::validation::ValidationContext,
+    ) -> Validation<Value, SchemaErrors> {
+        self.validate_value(value, path)
+    }
+
+    /// Collects schema reference names.
+    ///
+    /// Default implementation does nothing.
+    fn collect_refs(&self, _refs: &mut Vec<String>) {
+        // Most schemas have no references
+    }
 }
 
 /// Blanket implementation of `ValueValidator` for all `SchemaLike` types.
@@ -79,5 +170,18 @@ pub trait ValueValidator: Send + Sync {
 impl<S: SchemaLike> ValueValidator for S {
     fn validate_value(&self, value: &Value, path: &JsonPath) -> Validation<Value, SchemaErrors> {
         self.validate_to_value(value, path)
+    }
+
+    fn validate_value_with_context(
+        &self,
+        value: &Value,
+        path: &JsonPath,
+        context: &crate::validation::ValidationContext,
+    ) -> Validation<Value, SchemaErrors> {
+        self.validate_to_value_with_context(value, path, context)
+    }
+
+    fn collect_refs(&self, refs: &mut Vec<String>) {
+        SchemaLike::collect_refs(self, refs);
     }
 }

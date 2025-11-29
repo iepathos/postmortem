@@ -39,13 +39,16 @@
 
 pub mod error;
 pub mod path;
+pub mod registry;
 pub mod schema;
+pub mod validation;
 
 pub use error::{SchemaError, SchemaErrors};
 pub use path::{JsonPath, PathSegment};
+pub use registry::{RegistryError, SchemaRegistry};
 pub use schema::{
-    ArraySchema, CombinatorSchema, IntegerSchema, ObjectSchema, Schema, SchemaLike, StringSchema,
-    ValueValidator,
+    ArraySchema, CombinatorSchema, IntegerSchema, ObjectSchema, RefSchema, Schema, SchemaLike,
+    StringSchema, ValueValidator,
 };
 
 /// Type alias for validation results using SchemaErrors

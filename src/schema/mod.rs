@@ -20,6 +20,7 @@ mod array;
 mod combinators;
 mod numeric;
 mod object;
+mod ref_schema;
 mod string;
 mod traits;
 
@@ -27,6 +28,7 @@ pub use array::ArraySchema;
 pub use combinators::CombinatorSchema;
 pub use numeric::IntegerSchema;
 pub use object::ObjectSchema;
+pub use ref_schema::RefSchema;
 pub use string::StringSchema;
 pub use traits::{SchemaLike, ValueValidator};
 
@@ -350,5 +352,41 @@ impl Schema {
             },
         );
         CombinatorSchema::Optional { inner: validator }
+    }
+
+    /// Creates a reference to a named schema.
+    ///
+    /// Schema references enable reuse and recursive structures. The referenced
+    /// schema must be registered in a `SchemaRegistry` before validation.
+    ///
+    /// References can only be validated through a registry. Attempting to validate
+    /// without a registry produces an error with code `missing_registry`.
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// use postmortem::{Schema, SchemaRegistry};
+    /// use serde_json::json;
+    ///
+    /// let registry = SchemaRegistry::new();
+    ///
+    /// // Register base schema
+    /// registry.register("UserId", Schema::integer().positive()).unwrap();
+    ///
+    /// // Use reference in another schema
+    /// registry.register("User", Schema::object()
+    ///     .field("id", Schema::ref_("UserId"))
+    ///     .field("name", Schema::string())
+    /// ).unwrap();
+    ///
+    /// let result = registry.validate("User", &json!({
+    ///     "id": 42,
+    ///     "name": "Alice"
+    /// })).unwrap();
+    ///
+    /// assert!(result.is_success());
+    /// ```
+    pub fn ref_(name: impl Into<String>) -> RefSchema {
+        RefSchema::new(name)
     }
 }
