@@ -89,6 +89,43 @@ Enable validation of relationships between fields:
 
 ## Technical Details
 
+### ValidatedObject Type
+
+The `ValidatedObject` type provides safe access to validated field values:
+
+```rust
+/// Represents an object that has passed field-level validation.
+/// All field values have been validated according to their schemas.
+pub struct ValidatedObject {
+    fields: HashMap<String, Value>,
+}
+
+impl ValidatedObject {
+    /// Get a field value by name. Returns None if field doesn't exist.
+    pub fn get(&self, field: &str) -> Option<&Value>;
+
+    /// Check if a field exists and is not null.
+    pub fn has(&self, field: &str) -> bool {
+        self.get(field).is_some_and(|v| !v.is_null())
+    }
+
+    /// Get a field as a specific type.
+    pub fn get_as<T>(&self, field: &str) -> Option<T>
+    where Value: TryInto<T>;
+}
+```
+
+**Important behavior**:
+- Optional fields that weren't provided: `get()` returns `None`
+- Optional fields explicitly set to `null`: `get()` returns `Some(Value::Null)`
+- Use `has()` to check for non-null presence
+
+### Type Alias for Validators
+
+```rust
+type CrossFieldValidator = Box<dyn Fn(&ValidatedObject, &JsonPath) -> Validation<(), SchemaErrors> + 'static>;
+```
+
 ### Implementation Approach
 
 ```rust
@@ -98,6 +135,13 @@ impl ObjectSchema {
         F: Fn(&ValidatedObject, &JsonPath) -> Validation<(), SchemaErrors> + 'static,
     {
         self.cross_field_validators.push(Box::new(validator));
+        self
+    }
+
+    /// Configure whether to skip cross-field validation if field validation fails.
+    /// Default: true (skip cross-field when fields are invalid)
+    pub fn skip_cross_field_on_errors(mut self, skip: bool) -> Self {
+        self.skip_on_field_errors = skip;
         self
     }
 
@@ -236,8 +280,10 @@ impl ObjectSchema {
             // Compare as numbers if both are numbers, as strings otherwise
             match (value1, value2) {
                 (Some(Value::Number(n1)), Some(Value::Number(n2))) => {
-                    let f1 = n1.as_f64().unwrap_or(f64::NAN);
-                    let f2 = n2.as_f64().unwrap_or(f64::NAN);
+                    // Safely convert to f64, skip validation if conversion fails
+                    let Some(f1) = n1.as_f64() else { return success(()); };
+                    let Some(f2) = n2.as_f64() else { return success(()); };
+
                     if f1 >= f2 {
                         failure(SchemaErrors::single(
                             SchemaError::new(
@@ -263,7 +309,60 @@ impl ObjectSchema {
                         success(())
                     }
                 }
-                _ => success(()), // Skip if fields don't exist or aren't comparable
+                // Skip validation if:
+                // - Fields don't exist
+                // - Fields are null
+                // - Type mismatch (e.g., comparing number to string)
+                _ => success(()),
+            }
+        })
+    }
+
+    pub fn field_less_or_equal(
+        mut self,
+        field1: impl Into<String>,
+        field2: impl Into<String>,
+    ) -> Self {
+        let field1 = field1.into();
+        let field2 = field2.into();
+
+        self.custom(move |obj, path| {
+            use stillwater::validation::{success, failure};
+
+            let value1 = obj.get(&field1);
+            let value2 = obj.get(&field2);
+
+            match (value1, value2) {
+                (Some(Value::Number(n1)), Some(Value::Number(n2))) => {
+                    let Some(f1) = n1.as_f64() else { return success(()); };
+                    let Some(f2) = n2.as_f64() else { return success(()); };
+
+                    if f1 > f2 {
+                        failure(SchemaErrors::single(
+                            SchemaError::new(
+                                path.push_field(&field1),
+                                format!("'{}' must be less than or equal to '{}'", field1, field2),
+                            )
+                            .with_code("field_not_less_or_equal")
+                        ))
+                    } else {
+                        success(())
+                    }
+                }
+                (Some(Value::String(s1)), Some(Value::String(s2))) => {
+                    if s1 > s2 {
+                        failure(SchemaErrors::single(
+                            SchemaError::new(
+                                path.push_field(&field1),
+                                format!("'{}' must be less than or equal to '{}'", field1, field2),
+                            )
+                            .with_code("field_not_less_or_equal")
+                        ))
+                    } else {
+                        success(())
+                    }
+                }
+                _ => success(()),
             }
         })
     }
@@ -273,10 +372,8 @@ impl ObjectSchema {
         &self,
         validated: &ValidatedObject,
         path: &JsonPath,
-        skip_on_field_errors: bool,
-        field_errors: &[SchemaError],
     ) -> Vec<SchemaError> {
-        if skip_on_field_errors && !field_errors.is_empty() {
+        if self.skip_on_field_errors && !self.field_errors.is_empty() {
             return vec![];
         }
 
@@ -288,25 +385,146 @@ impl ObjectSchema {
         }
         errors
     }
+
+    // Main validate method showing error accumulation
+    pub fn validate(&self, value: &Value, path: &JsonPath)
+        -> Validation<ValidatedObject, SchemaErrors>
+    {
+        use stillwater::validation::{success, failure};
+
+        // Step 1: Validate each field according to its schema
+        let mut field_errors = Vec::new();
+        let mut validated_fields = HashMap::new();
+
+        for (field_name, field_schema) in &self.fields {
+            match value.get(field_name) {
+                Some(field_value) => {
+                    let field_path = path.push_field(field_name);
+                    match field_schema.validate(field_value, &field_path) {
+                        Validation::Success(v) => {
+                            validated_fields.insert(field_name.clone(), v);
+                        }
+                        Validation::Failure(e) => {
+                            field_errors.extend(e.into_iter());
+                        }
+                    }
+                }
+                None if self.required_fields.contains(field_name) => {
+                    field_errors.push(SchemaError::new(
+                        path.push_field(field_name),
+                        format!("'{}' is required", field_name),
+                    ).with_code("required"));
+                }
+                None => {
+                    // Optional field not provided - skip
+                }
+            }
+        }
+
+        // Step 2: Run cross-field validation (only if configured to do so)
+        let validated_obj = ValidatedObject { fields: validated_fields };
+        let cross_errors = self.run_cross_field_validation(&validated_obj, path);
+
+        // Step 3: Accumulate all errors
+        field_errors.extend(cross_errors);
+
+        // Step 4: Return result
+        if field_errors.is_empty() {
+            success(validated_obj)
+        } else {
+            failure(SchemaErrors::from(field_errors))
+        }
+    }
 }
 ```
 
+### Error Path Strategy
+
+Cross-field validation errors use different path strategies depending on the rule:
+
+- **Object-level rules** (e.g., `mutually_exclusive`, `at_least_one_of`): Attach error to the object path, as the error involves the object as a whole
+- **Field-level rules** (e.g., `equal_fields`, `field_less_than`): Attach error to the specific field path that failed the constraint
+- **Conditional rules** (e.g., `require_if`): Attach error to the field that is required but missing
+
+This strategy ensures errors appear in the most logical location for developers to fix them.
+
+### Error Codes Reference
+
+| Error Code | Pattern | Description |
+|------------|---------|-------------|
+| `conditional_required` | `require_if` | Field is required when condition is met |
+| `mutually_exclusive` | `mutually_exclusive` | Both fields present when only one allowed |
+| `at_least_one_required` | `at_least_one_of` | None of the required fields present |
+| `fields_not_equal` | `equal_fields` | Fields don't match when they should |
+| `field_not_less_than` | `field_less_than` | First field not less than second |
+| `field_not_less_or_equal` | `field_less_or_equal` | First field not less than or equal to second |
+
+### Null vs Missing Field Behavior
+
+Cross-field validators distinguish between missing and null fields:
+
+```rust
+// Missing field
+{"email": "user@example.com"}  // phone is missing
+obj.get("phone") // returns None
+
+// Null field
+{"email": "user@example.com", "phone": null}  // phone is explicitly null
+obj.get("phone") // returns Some(Value::Null)
+
+// For convenience, use has() to check for non-null presence
+obj.has("phone")  // false in both cases above
+```
+
+**Helper method behavior**:
+- `mutually_exclusive`: Treats `null` as absent (allows both if one is null)
+- `at_least_one_of`: Requires at least one non-null value
+- `require_if`: Only validates if the required field is missing entirely
+- `equal_fields`: Only validates if both fields exist (skips if either missing/null)
+- `field_less_than`: Only validates if both fields exist and are comparable types
+
+### Type Mismatch Handling
+
+When comparing fields of different types:
+
+```rust
+// Comparing number to string - validation is skipped
+{"start": 100, "end": "200"}
+field_less_than("start", "end")  // No error - types don't match
+
+// Comparing null to value - validation is skipped
+{"start": null, "end": 200}
+field_less_than("start", "end")  // No error - start is null
+```
+
+**Rationale**: Type mismatches indicate a schema design issue, not a validation error. Field-level schemas should ensure correct types before cross-field validation runs.
+
 ### Architecture Changes
 
-- Extend ObjectSchema with cross-field validator storage
+- Extend ObjectSchema with:
+  - `cross_field_validators: Vec<CrossFieldValidator>`
+  - `skip_on_field_errors: bool` (default: `true`)
 - Add helper methods for common patterns
 - Update validation to run cross-field after field validation
 
 ### Data Structures
 
-- Cross-field validator: `Box<dyn Fn(&ValidatedObject, &JsonPath) -> Validation<(), SchemaErrors>>`
-- ValidatedObject provides field access
+```rust
+type CrossFieldValidator = Box<dyn Fn(&ValidatedObject, &JsonPath) -> Validation<(), SchemaErrors> + 'static>;
+
+pub struct ValidatedObject {
+    fields: HashMap<String, Value>,
+}
+```
 
 ### APIs and Interfaces
 
 ```rust
 // Custom cross-field validation
 ObjectSchema::custom<F>(self, validator: F) -> Self
+
+// Configuration
+ObjectSchema::skip_cross_field_on_errors(self, skip: bool) -> Self
 
 // Common patterns
 ObjectSchema::require_if<P>(self, field: &str, predicate: P, required: &str) -> Self
@@ -316,6 +534,14 @@ ObjectSchema::equal_fields(self, field1: &str, field2: &str) -> Self
 ObjectSchema::field_less_than(self, field1: &str, field2: &str) -> Self
 ObjectSchema::field_less_or_equal(self, field1: &str, field2: &str) -> Self
 ```
+
+### Performance Considerations
+
+- **Validator storage**: Each helper method adds one boxed closure to the validator list
+- **Execution time**: O(n) where n = number of validators; validators run sequentially
+- **Memory**: Validators are stored in a `Vec`, minimal overhead per validator
+- **Skip optimization**: When `skip_on_field_errors` is true, cross-field validation is bypassed entirely if any field errors exist, saving computation
+- **Recommended limits**: While there's no hard limit, objects with >20 cross-field validators may indicate over-complex validation logic that should be refactored
 
 ## Dependencies
 
@@ -333,30 +559,71 @@ ObjectSchema::field_less_or_equal(self, field1: &str, field2: &str) -> Self
   - equal_fields matching/non-matching
   - field comparison (numbers and strings)
   - Cross-field error accumulation
+  - skip_cross_field_on_errors configuration
 
 - **Integration Tests**:
-  - Multiple cross-field rules
+  - Multiple cross-field rules on same object
   - Cross-field with nested objects
-  - Skip behavior on field errors
+  - Skip behavior on field errors (enabled/disabled)
+  - All cross-field errors reported when multiple rules fail
+  - Validator execution order (verify deterministic behavior)
 
 - **Edge Cases**:
   - Missing fields in comparisons
-  - Null field values
-  - Type mismatches in comparisons
+  - Null field values (explicit null vs missing)
+  - Type mismatches in comparisons (number vs string)
+  - Number conversion failures (values outside f64 range)
+  - Empty string comparisons
+  - Validators that capture and use external state
+  - at_least_one_of with all fields null vs all fields missing
+  - mutually_exclusive with one field null, one field present
+
+- **Null Handling Tests**:
+  ```rust
+  // at_least_one_of: all null should fail
+  {"email": null, "phone": null}  // Error: at least one required
+
+  // at_least_one_of: one null, one missing should fail
+  {"email": null}  // Error: at least one required
+
+  // mutually_exclusive: both null should pass
+  {"email": null, "phone": null}  // OK
+
+  // mutually_exclusive: one null, one present should pass
+  {"email": "user@example.com", "phone": null}  // OK
+  ```
 
 ## Documentation Requirements
 
-- **Code Documentation**: Examples for each pattern
-- **User Documentation**: Guide to cross-field validation
-- **Architecture Updates**: Document validation execution order
+- **Code Documentation**:
+  - Doc comments for each helper method with examples
+  - ValidatedObject API documentation
+  - Error code reference in module docs
+  - Null vs missing field behavior
+  - Type mismatch handling rationale
+
+- **User Documentation**:
+  - Guide to cross-field validation patterns
+  - When to use custom vs helper methods
+  - Best practices for error messages
+  - Performance considerations for many validators
+
+- **Architecture Updates**:
+  - Validation execution order (field → cross-field)
+  - Error accumulation strategy
+  - Skip behavior configuration
 
 ## Implementation Notes
 
-- Field validation runs first, then cross-field
-- Consider whether to skip cross-field on field errors (configurable)
-- Cross-field validators receive validated values, not raw input
-- Date comparison works via string comparison (ISO 8601 is lexicographically sortable)
-- Error codes should be consistent and machine-readable
+- **Validation execution order**: Field validation runs first, then cross-field validation
+- **Skip behavior**: By default, cross-field validation is skipped if field validation fails (configurable via `skip_cross_field_on_errors`)
+- **Validated values**: Cross-field validators receive validated values, not raw input
+- **Date comparison**: Works via string comparison (ISO 8601 dates are lexicographically sortable)
+- **Error codes**: Must be consistent and machine-readable for client-side handling
+- **Performance**: Cross-field validators execute in sequence (O(n) where n = number of validators)
+- **Null handling**: Use `obj.has(field)` to check for non-null presence, `obj.get(field)` for raw access
+- **Type safety**: Field-level schemas should enforce types; cross-field comparisons skip type mismatches
+- **MSRV consideration**: `is_some_and()` requires Rust 1.70+; verify project MSRV compatibility
 
 ## Migration and Compatibility
 
@@ -426,7 +693,7 @@ let order = Schema::object()
 // Validation
 let result = date_range.validate(&json!({
     "start_date": "2024-12-01",
-    "end_date": "2024-01-01"  // Before start!
+    "end_date": "2024-01-01"  // Before start! Should fail validation
 }), &JsonPath::root());
 // Error: 'start_date' must be less than 'end_date'
 ```
