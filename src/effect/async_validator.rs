@@ -202,14 +202,13 @@ impl<E> AsyncStringSchema<E> {
                 let all_errors: Vec<_> = self
                     .async_validators
                     .par_iter()
-                    .filter_map(|validator| {
+                    .flat_map(|validator| {
                         let result = validator.validate_async(value, path, env);
                         match result {
-                            Validation::Failure(errors) => Some(errors),
-                            Validation::Success(_) => None,
+                            Validation::Failure(errors) => errors.into_iter().collect::<Vec<_>>(),
+                            Validation::Success(_) => Vec::new(),
                         }
                     })
-                    .flatten()
                     .collect();
 
                 if all_errors.is_empty() {
