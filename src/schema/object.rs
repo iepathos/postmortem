@@ -1,16 +1,47 @@
 //! Object schema validation.
 //!
 //! This module provides [`ObjectSchema`] for validating JSON objects with
-//! typed fields, optional fields, default values, and additional property handling.
+//! typed fields, optional fields, default values, additional property handling,
+//! and cross-field validation.
 
 use indexmap::IndexMap;
 use serde_json::{Map, Value};
+use std::collections::HashMap;
 use stillwater::Validation;
 
 use crate::error::{SchemaError, SchemaErrors};
 use crate::path::JsonPath;
 
 use super::traits::SchemaLike;
+
+/// Type alias for cross-field validators.
+///
+/// A cross-field validator receives the validated object (after field validation)
+/// and the current path, returning a validation result.
+type CrossFieldValidator =
+    Box<dyn Fn(&ValidatedObject, &JsonPath) -> Validation<(), SchemaErrors> + Send + Sync + 'static>;
+
+/// Represents an object that has passed field-level validation.
+///
+/// All field values have been validated according to their schemas.
+/// This type provides safe access to validated field values for cross-field validation.
+pub struct ValidatedObject {
+    fields: HashMap<String, Value>,
+}
+
+impl ValidatedObject {
+    /// Get a field value by name. Returns None if field doesn't exist.
+    pub fn get(&self, field: &str) -> Option<&Value> {
+        self.fields.get(field)
+    }
+
+    /// Check if a field exists and is not null.
+    ///
+    /// Returns `false` for both missing fields and fields explicitly set to `null`.
+    pub fn has(&self, field: &str) -> bool {
+        self.get(field).is_some_and(|v| !v.is_null())
+    }
+}
 
 /// Definition of a field within an object schema.
 struct FieldDef {
@@ -58,6 +89,8 @@ pub struct ObjectSchema {
     fields: IndexMap<String, FieldDef>,
     additional_properties: AdditionalProperties,
     type_error_message: Option<String>,
+    cross_field_validators: Vec<CrossFieldValidator>,
+    skip_on_field_errors: bool,
 }
 
 impl ObjectSchema {
@@ -67,6 +100,8 @@ impl ObjectSchema {
             fields: IndexMap::new(),
             additional_properties: AdditionalProperties::Allow,
             type_error_message: None,
+            cross_field_validators: Vec::new(),
+            skip_on_field_errors: true,
         }
     }
 
@@ -228,6 +263,362 @@ impl ObjectSchema {
         self
     }
 
+    /// Adds a custom cross-field validator.
+    ///
+    /// Cross-field validators run after all field-level validations pass (or fail,
+    /// depending on `skip_on_field_errors` configuration). They receive a
+    /// `ValidatedObject` containing all validated field values.
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// use postmortem::{Schema, JsonPath};
+    /// use serde_json::json;
+    /// use stillwater::Validation;
+    ///
+    /// let schema = Schema::object()
+    ///     .field("quantity", Schema::integer().positive())
+    ///     .field("unit_price", Schema::integer().non_negative())
+    ///     .field("total", Schema::integer().non_negative())
+    ///     .custom(|obj, path| {
+    ///         let qty = obj.get("quantity").and_then(|v| v.as_i64()).unwrap_or(0);
+    ///         let price = obj.get("unit_price").and_then(|v| v.as_i64()).unwrap_or(0);
+    ///         let total = obj.get("total").and_then(|v| v.as_i64()).unwrap_or(0);
+    ///
+    ///         if qty * price != total {
+    ///             Validation::Failure(postmortem::SchemaErrors::single(
+    ///                 postmortem::SchemaError::new(
+    ///                     path.push_field("total"),
+    ///                     "total must equal quantity * unit_price"
+    ///                 ).with_code("invalid_total")
+    ///             ))
+    ///         } else {
+    ///             Validation::Success(())
+    ///         }
+    ///     });
+    /// ```
+    pub fn custom<F>(self, validator: F) -> Self
+    where
+        F: Fn(&ValidatedObject, &JsonPath) -> Validation<(), SchemaErrors> + Send + Sync + 'static,
+    {
+        let mut schema = self;
+        schema.cross_field_validators.push(Box::new(validator));
+        schema
+    }
+
+    /// Configure whether to skip cross-field validation if field validation fails.
+    ///
+    /// Default: `true` (skip cross-field when fields are invalid).
+    ///
+    /// When `true`, cross-field validators only run if all field-level validations
+    /// pass. This is usually the desired behavior since cross-field validators
+    /// often assume fields have valid values.
+    ///
+    /// Set to `false` to always run cross-field validators, even if some field
+    /// validations failed.
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// use postmortem::Schema;
+    ///
+    /// let schema = Schema::object()
+    ///     .field("name", Schema::string())
+    ///     .skip_cross_field_on_errors(false);  // Always run cross-field validators
+    /// ```
+    pub fn skip_cross_field_on_errors(mut self, skip: bool) -> Self {
+        self.skip_on_field_errors = skip;
+        self
+    }
+
+    /// Requires a field when a condition is met.
+    ///
+    /// If the condition field matches the predicate, the required field must be present.
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// use postmortem::Schema;
+    /// use serde_json::json;
+    ///
+    /// let schema = Schema::object()
+    ///     .field("method", Schema::string())
+    ///     .optional("card_number", Schema::string())
+    ///     .require_if("method", |v| v == &json!("card"), "card_number");
+    /// ```
+    pub fn require_if<P>(
+        self,
+        condition_field: impl Into<String>,
+        predicate: P,
+        required_field: impl Into<String>,
+    ) -> Self
+    where
+        P: Fn(&Value) -> bool + Send + Sync + 'static,
+    {
+        let condition_field = condition_field.into();
+        let required_field = required_field.into();
+
+        self.custom(move |obj, path| {
+            let condition_value = obj.get(&condition_field);
+            let required_value = obj.get(&required_field);
+
+            match (condition_value, required_value) {
+                (Some(cv), None) if predicate(cv) => Validation::Failure(SchemaErrors::single(
+                    SchemaError::new(
+                        path.push_field(&required_field),
+                        format!(
+                            "'{}' is required when '{}' matches condition",
+                            required_field, condition_field
+                        ),
+                    )
+                    .with_code("conditional_required"),
+                )),
+                _ => Validation::Success(()),
+            }
+        })
+    }
+
+    /// Ensures two fields are mutually exclusive.
+    ///
+    /// At most one of the two fields can be present (non-null).
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// use postmortem::Schema;
+    ///
+    /// let schema = Schema::object()
+    ///     .optional("email", Schema::string())
+    ///     .optional("phone", Schema::string())
+    ///     .mutually_exclusive("email", "phone");
+    /// ```
+    pub fn mutually_exclusive(
+        self,
+        field1: impl Into<String>,
+        field2: impl Into<String>,
+    ) -> Self {
+        let field1 = field1.into();
+        let field2 = field2.into();
+
+        self.custom(move |obj, path| {
+            let has_field1 = obj.has(&field1);
+            let has_field2 = obj.has(&field2);
+
+            if has_field1 && has_field2 {
+                Validation::Failure(SchemaErrors::single(
+                    SchemaError::new(
+                        path.clone(),
+                        format!("'{}' and '{}' are mutually exclusive", field1, field2),
+                    )
+                    .with_code("mutually_exclusive"),
+                ))
+            } else {
+                Validation::Success(())
+            }
+        })
+    }
+
+    /// Requires at least one of the specified fields to be present.
+    ///
+    /// At least one field must exist and be non-null.
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// use postmortem::Schema;
+    ///
+    /// let schema = Schema::object()
+    ///     .optional("email", Schema::string())
+    ///     .optional("phone", Schema::string())
+    ///     .at_least_one_of(["email", "phone"]);
+    /// ```
+    pub fn at_least_one_of<I, S>(self, fields: I) -> Self
+    where
+        I: IntoIterator<Item = S>,
+        S: Into<String>,
+    {
+        let fields: Vec<String> = fields.into_iter().map(Into::into).collect();
+
+        self.custom(move |obj, path| {
+            let has_any = fields.iter().any(|f| obj.has(f));
+
+            if has_any {
+                Validation::Success(())
+            } else {
+                Validation::Failure(SchemaErrors::single(
+                    SchemaError::new(
+                        path.clone(),
+                        format!("at least one of {:?} is required", fields),
+                    )
+                    .with_code("at_least_one_required"),
+                ))
+            }
+        })
+    }
+
+    /// Ensures two fields have equal values.
+    ///
+    /// If both fields are present, their values must be equal.
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// use postmortem::Schema;
+    ///
+    /// let schema = Schema::object()
+    ///     .field("password", Schema::string())
+    ///     .field("confirm_password", Schema::string())
+    ///     .equal_fields("password", "confirm_password");
+    /// ```
+    pub fn equal_fields(self, field1: impl Into<String>, field2: impl Into<String>) -> Self {
+        let field1 = field1.into();
+        let field2 = field2.into();
+
+        self.custom(move |obj, path| {
+            let value1 = obj.get(&field1);
+            let value2 = obj.get(&field2);
+
+            match (value1, value2) {
+                (Some(v1), Some(v2)) if v1 != v2 => Validation::Failure(SchemaErrors::single(
+                    SchemaError::new(
+                        path.push_field(&field2),
+                        format!("'{}' must match '{}'", field2, field1),
+                    )
+                    .with_code("fields_not_equal"),
+                )),
+                _ => Validation::Success(()),
+            }
+        })
+    }
+
+    /// Ensures field1 is less than field2.
+    ///
+    /// Works for numbers and strings (lexicographic comparison).
+    /// Skips validation if fields are missing, null, or have incompatible types.
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// use postmortem::Schema;
+    ///
+    /// let schema = Schema::object()
+    ///     .field("start_date", Schema::string())
+    ///     .field("end_date", Schema::string())
+    ///     .field_less_than("start_date", "end_date");
+    /// ```
+    pub fn field_less_than(self, field1: impl Into<String>, field2: impl Into<String>) -> Self {
+        let field1 = field1.into();
+        let field2 = field2.into();
+
+        self.custom(move |obj, path| {
+            let value1 = obj.get(&field1);
+            let value2 = obj.get(&field2);
+
+            match (value1, value2) {
+                (Some(Value::Number(n1)), Some(Value::Number(n2))) => {
+                    let Some(f1) = n1.as_f64() else {
+                        return Validation::Success(());
+                    };
+                    let Some(f2) = n2.as_f64() else {
+                        return Validation::Success(());
+                    };
+
+                    if f1 >= f2 {
+                        Validation::Failure(SchemaErrors::single(
+                            SchemaError::new(
+                                path.push_field(&field1),
+                                format!("'{}' must be less than '{}'", field1, field2),
+                            )
+                            .with_code("field_not_less_than"),
+                        ))
+                    } else {
+                        Validation::Success(())
+                    }
+                }
+                (Some(Value::String(s1)), Some(Value::String(s2))) => {
+                    if s1 >= s2 {
+                        Validation::Failure(SchemaErrors::single(
+                            SchemaError::new(
+                                path.push_field(&field1),
+                                format!("'{}' must be less than '{}'", field1, field2),
+                            )
+                            .with_code("field_not_less_than"),
+                        ))
+                    } else {
+                        Validation::Success(())
+                    }
+                }
+                _ => Validation::Success(()),
+            }
+        })
+    }
+
+    /// Ensures field1 is less than or equal to field2.
+    ///
+    /// Works for numbers and strings (lexicographic comparison).
+    /// Skips validation if fields are missing, null, or have incompatible types.
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// use postmortem::Schema;
+    ///
+    /// let schema = Schema::object()
+    ///     .field("min", Schema::integer())
+    ///     .field("max", Schema::integer())
+    ///     .field_less_or_equal("min", "max");
+    /// ```
+    pub fn field_less_or_equal(
+        self,
+        field1: impl Into<String>,
+        field2: impl Into<String>,
+    ) -> Self {
+        let field1 = field1.into();
+        let field2 = field2.into();
+
+        self.custom(move |obj, path| {
+            let value1 = obj.get(&field1);
+            let value2 = obj.get(&field2);
+
+            match (value1, value2) {
+                (Some(Value::Number(n1)), Some(Value::Number(n2))) => {
+                    let Some(f1) = n1.as_f64() else {
+                        return Validation::Success(());
+                    };
+                    let Some(f2) = n2.as_f64() else {
+                        return Validation::Success(());
+                    };
+
+                    if f1 > f2 {
+                        Validation::Failure(SchemaErrors::single(
+                            SchemaError::new(
+                                path.push_field(&field1),
+                                format!("'{}' must be less than or equal to '{}'", field1, field2),
+                            )
+                            .with_code("field_not_less_or_equal"),
+                        ))
+                    } else {
+                        Validation::Success(())
+                    }
+                }
+                (Some(Value::String(s1)), Some(Value::String(s2))) => {
+                    if s1 > s2 {
+                        Validation::Failure(SchemaErrors::single(
+                            SchemaError::new(
+                                path.push_field(&field1),
+                                format!("'{}' must be less than or equal to '{}'", field1, field2),
+                            )
+                            .with_code("field_not_less_or_equal"),
+                        ))
+                    } else {
+                        Validation::Success(())
+                    }
+                }
+                _ => Validation::Success(()),
+            }
+        })
+    }
+
     /// Validates a value against this schema.
     ///
     /// Returns `Validation::Success` with a `Map<String, Value>` containing
@@ -317,6 +708,22 @@ impl ObjectSchema {
                             }
                         }
                     }
+                }
+            }
+        }
+
+        // Run cross-field validation if configured
+        if !self.skip_on_field_errors || errors.is_empty() {
+            let validated_obj = ValidatedObject {
+                fields: validated
+                    .iter()
+                    .map(|(k, v)| (k.clone(), v.clone()))
+                    .collect(),
+            };
+
+            for validator in &self.cross_field_validators {
+                if let Validation::Failure(e) = validator(&validated_obj, path) {
+                    errors.extend(e.into_iter());
                 }
             }
         }
