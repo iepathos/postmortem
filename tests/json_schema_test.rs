@@ -297,12 +297,19 @@ fn test_combinator_schema_all_of() {
 #[test]
 fn test_registry_to_json_schema() {
     let registry = SchemaRegistry::new();
-    registry.register("UserId", Schema::integer().positive()).unwrap();
-    registry.register("Email", Schema::string().email()).unwrap();
+    registry
+        .register("UserId", Schema::integer().positive())
+        .unwrap();
+    registry
+        .register("Email", Schema::string().email())
+        .unwrap();
 
     let json_schema = registry.to_json_schema();
 
-    assert_eq!(json_schema["$schema"], "https://json-schema.org/draft/2020-12/schema");
+    assert_eq!(
+        json_schema["$schema"],
+        "https://json-schema.org/draft/2020-12/schema"
+    );
     assert!(json_schema["$defs"].is_object());
     assert_eq!(json_schema["$defs"]["UserId"]["type"], "integer");
     assert_eq!(json_schema["$defs"]["Email"]["type"], "string");
@@ -312,15 +319,24 @@ fn test_registry_to_json_schema() {
 #[test]
 fn test_registry_export_schema() {
     let registry = SchemaRegistry::new();
-    registry.register("UserId", Schema::integer().positive()).unwrap();
-    registry.register("User", Schema::object()
-        .field("id", Schema::ref_("UserId"))
-        .field("email", Schema::string().email())
-    ).unwrap();
+    registry
+        .register("UserId", Schema::integer().positive())
+        .unwrap();
+    registry
+        .register(
+            "User",
+            Schema::object()
+                .field("id", Schema::ref_("UserId"))
+                .field("email", Schema::string().email()),
+        )
+        .unwrap();
 
     let user_schema = registry.export_schema("User").unwrap();
 
-    assert_eq!(user_schema["$schema"], "https://json-schema.org/draft/2020-12/schema");
+    assert_eq!(
+        user_schema["$schema"],
+        "https://json-schema.org/draft/2020-12/schema"
+    );
     assert_eq!(user_schema["type"], "object");
     assert_eq!(user_schema["properties"]["id"]["$ref"], "#/$defs/UserId");
     assert_eq!(user_schema["properties"]["email"]["type"], "string");
@@ -341,5 +357,8 @@ fn test_nested_object_schema() {
 
     assert_eq!(json_schema["type"], "object");
     assert_eq!(json_schema["properties"]["address"]["type"], "object");
-    assert_eq!(json_schema["properties"]["address"]["properties"]["street"]["type"], "string");
+    assert_eq!(
+        json_schema["properties"]["address"]["properties"]["street"]["type"],
+        "string"
+    );
 }
