@@ -17,16 +17,18 @@
 //! ```
 
 mod array;
+mod combinators;
 mod numeric;
 mod object;
 mod string;
 mod traits;
 
 pub use array::ArraySchema;
+pub use combinators::CombinatorSchema;
 pub use numeric::IntegerSchema;
 pub use object::ObjectSchema;
 pub use string::StringSchema;
-pub use traits::SchemaLike;
+pub use traits::{SchemaLike, ValueValidator};
 
 /// Entry point for creating validation schemas.
 ///
@@ -167,5 +169,186 @@ impl Schema {
     /// ```
     pub fn array<S: SchemaLike>(item_schema: S) -> ArraySchema<S> {
         ArraySchema::new(item_schema)
+    }
+
+    /// Creates a one-of combinator schema.
+    ///
+    /// Exactly one of the provided schemas must match. This is ideal for
+    /// discriminated unions where a value must be one of several distinct types.
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// use postmortem::{Schema, ValueValidator, SchemaLike, JsonPath};
+    /// use serde_json::json;
+    ///
+    /// // Shape can be either a circle or rectangle
+    /// let shape = Schema::one_of(vec![
+    ///     Box::new(Schema::object()
+    ///         .field("type", Schema::string())
+    ///         .field("radius", Schema::integer().positive())) as Box<dyn ValueValidator>,
+    ///     Box::new(Schema::object()
+    ///         .field("type", Schema::string())
+    ///         .field("width", Schema::integer().positive())
+    ///         .field("height", Schema::integer().positive())) as Box<dyn ValueValidator>,
+    /// ]);
+    ///
+    /// let result = shape.validate(&json!({
+    ///     "type": "circle",
+    ///     "radius": 5
+    /// }), &JsonPath::root());
+    /// assert!(result.is_success());
+    /// ```
+    pub fn one_of<I>(schemas: I) -> CombinatorSchema
+    where
+        I: IntoIterator<Item = Box<dyn ValueValidator>>,
+    {
+        use crate::schema::combinators::ValidatorFn;
+        use std::sync::Arc;
+        let validators: Vec<ValidatorFn> = schemas
+            .into_iter()
+            .map(|schema| {
+                Arc::new(
+                    move |value: &serde_json::Value, path: &crate::path::JsonPath| {
+                        schema.validate_value(value, path)
+                    },
+                ) as ValidatorFn
+            })
+            .collect();
+        CombinatorSchema::OneOf {
+            schemas: validators,
+        }
+    }
+
+    /// Creates an any-of combinator schema.
+    ///
+    /// At least one of the provided schemas must match. This is more permissive
+    /// than `one_of` and allows multiple matches. Validation short-circuits on
+    /// the first match.
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// use postmortem::{Schema, ValueValidator, SchemaLike, JsonPath};
+    /// use serde_json::json;
+    ///
+    /// // ID can be either a string or positive integer
+    /// let id = Schema::any_of(vec![
+    ///     Box::new(Schema::string().min_len(1)) as Box<dyn ValueValidator>,
+    ///     Box::new(Schema::integer().positive()) as Box<dyn ValueValidator>,
+    /// ]);
+    ///
+    /// let result = id.validate(&json!("abc-123"), &JsonPath::root());
+    /// assert!(result.is_success());
+    ///
+    /// let result = id.validate(&json!(42), &JsonPath::root());
+    /// assert!(result.is_success());
+    /// ```
+    pub fn any_of<I>(schemas: I) -> CombinatorSchema
+    where
+        I: IntoIterator<Item = Box<dyn ValueValidator>>,
+    {
+        use crate::schema::combinators::ValidatorFn;
+        use std::sync::Arc;
+        let validators: Vec<ValidatorFn> = schemas
+            .into_iter()
+            .map(|schema| {
+                Arc::new(
+                    move |value: &serde_json::Value, path: &crate::path::JsonPath| {
+                        schema.validate_value(value, path)
+                    },
+                ) as ValidatorFn
+            })
+            .collect();
+        CombinatorSchema::AnyOf {
+            schemas: validators,
+        }
+    }
+
+    /// Creates an all-of combinator schema.
+    ///
+    /// All of the provided schemas must match. This is useful for schema
+    /// composition and intersection, where a value must satisfy multiple
+    /// independent constraints.
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// use postmortem::{Schema, ValueValidator, SchemaLike, JsonPath};
+    /// use serde_json::json;
+    ///
+    /// // Entity must have both a name and a timestamp
+    /// let named = Schema::object()
+    ///     .field("name", Schema::string().min_len(1));
+    ///
+    /// let timestamped = Schema::object()
+    ///     .field("created_at", Schema::string());
+    ///
+    /// let entity = Schema::all_of(vec![
+    ///     Box::new(named) as Box<dyn ValueValidator>,
+    ///     Box::new(timestamped) as Box<dyn ValueValidator>,
+    /// ]);
+    ///
+    /// let result = entity.validate(&json!({
+    ///     "name": "Alice",
+    ///     "created_at": "2025-01-01"
+    /// }), &JsonPath::root());
+    /// assert!(result.is_success());
+    /// ```
+    pub fn all_of<I>(schemas: I) -> CombinatorSchema
+    where
+        I: IntoIterator<Item = Box<dyn ValueValidator>>,
+    {
+        use crate::schema::combinators::ValidatorFn;
+        use std::sync::Arc;
+        let validators: Vec<ValidatorFn> = schemas
+            .into_iter()
+            .map(|schema| {
+                Arc::new(
+                    move |value: &serde_json::Value, path: &crate::path::JsonPath| {
+                        schema.validate_value(value, path)
+                    },
+                ) as ValidatorFn
+            })
+            .collect();
+        CombinatorSchema::AllOf {
+            schemas: validators,
+        }
+    }
+
+    /// Creates an optional combinator schema.
+    ///
+    /// The value can be null. Non-null values are validated against the inner schema.
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// use postmortem::{Schema, ValueValidator, SchemaLike, JsonPath};
+    /// use serde_json::json;
+    ///
+    /// let optional_string = Schema::optional(
+    ///     Box::new(Schema::string().min_len(1)) as Box<dyn ValueValidator>
+    /// );
+    ///
+    /// // Null is valid
+    /// let result = optional_string.validate(&json!(null), &JsonPath::root());
+    /// assert!(result.is_success());
+    ///
+    /// // Non-null values are validated
+    /// let result = optional_string.validate(&json!("hello"), &JsonPath::root());
+    /// assert!(result.is_success());
+    ///
+    /// let result = optional_string.validate(&json!(""), &JsonPath::root());
+    /// assert!(result.is_failure());
+    /// ```
+    pub fn optional(inner: Box<dyn ValueValidator>) -> CombinatorSchema {
+        use crate::schema::combinators::ValidatorFn;
+        use std::sync::Arc;
+        let validator: ValidatorFn = Arc::new(
+            move |value: &serde_json::Value, path: &crate::path::JsonPath| {
+                inner.validate_value(value, path)
+            },
+        );
+        CombinatorSchema::Optional { inner: validator }
     }
 }
