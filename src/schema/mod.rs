@@ -20,6 +20,7 @@ mod array;
 mod combinators;
 mod numeric;
 mod object;
+mod ref_schema;
 mod string;
 mod traits;
 
@@ -27,6 +28,7 @@ pub use array::ArraySchema;
 pub use combinators::CombinatorSchema;
 pub use numeric::IntegerSchema;
 pub use object::ObjectSchema;
+pub use ref_schema::RefSchema;
 pub use string::StringSchema;
 pub use traits::{SchemaLike, ValueValidator};
 
@@ -205,18 +207,24 @@ impl Schema {
     {
         use crate::schema::combinators::ValidatorFn;
         use std::sync::Arc;
-        let validators: Vec<ValidatorFn> = schemas
+        let validators: Vec<Arc<dyn ValueValidator>> = schemas
             .into_iter()
-            .map(|schema| {
+            .map(|schema| Arc::from(schema) as Arc<dyn ValueValidator>)
+            .collect();
+        let validator_fns: Vec<ValidatorFn> = validators
+            .iter()
+            .map(|validator| {
+                let v = Arc::clone(validator);
                 Arc::new(
                     move |value: &serde_json::Value, path: &crate::path::JsonPath| {
-                        schema.validate_value(value, path)
+                        v.validate_value(value, path)
                     },
                 ) as ValidatorFn
             })
             .collect();
         CombinatorSchema::OneOf {
-            schemas: validators,
+            schemas: validator_fns,
+            validators,
         }
     }
 
@@ -250,18 +258,24 @@ impl Schema {
     {
         use crate::schema::combinators::ValidatorFn;
         use std::sync::Arc;
-        let validators: Vec<ValidatorFn> = schemas
+        let validators: Vec<Arc<dyn ValueValidator>> = schemas
             .into_iter()
-            .map(|schema| {
+            .map(|schema| Arc::from(schema) as Arc<dyn ValueValidator>)
+            .collect();
+        let validator_fns: Vec<ValidatorFn> = validators
+            .iter()
+            .map(|validator| {
+                let v = Arc::clone(validator);
                 Arc::new(
                     move |value: &serde_json::Value, path: &crate::path::JsonPath| {
-                        schema.validate_value(value, path)
+                        v.validate_value(value, path)
                     },
                 ) as ValidatorFn
             })
             .collect();
         CombinatorSchema::AnyOf {
-            schemas: validators,
+            schemas: validator_fns,
+            validators,
         }
     }
 
@@ -301,18 +315,24 @@ impl Schema {
     {
         use crate::schema::combinators::ValidatorFn;
         use std::sync::Arc;
-        let validators: Vec<ValidatorFn> = schemas
+        let validators: Vec<Arc<dyn ValueValidator>> = schemas
             .into_iter()
-            .map(|schema| {
+            .map(|schema| Arc::from(schema) as Arc<dyn ValueValidator>)
+            .collect();
+        let validator_fns: Vec<ValidatorFn> = validators
+            .iter()
+            .map(|validator| {
+                let v = Arc::clone(validator);
                 Arc::new(
                     move |value: &serde_json::Value, path: &crate::path::JsonPath| {
-                        schema.validate_value(value, path)
+                        v.validate_value(value, path)
                     },
                 ) as ValidatorFn
             })
             .collect();
         CombinatorSchema::AllOf {
-            schemas: validators,
+            schemas: validator_fns,
+            validators,
         }
     }
 
@@ -344,11 +364,54 @@ impl Schema {
     pub fn optional(inner: Box<dyn ValueValidator>) -> CombinatorSchema {
         use crate::schema::combinators::ValidatorFn;
         use std::sync::Arc;
-        let validator: ValidatorFn = Arc::new(
-            move |value: &serde_json::Value, path: &crate::path::JsonPath| {
-                inner.validate_value(value, path)
-            },
-        );
-        CombinatorSchema::Optional { inner: validator }
+        let validator = Arc::from(inner) as Arc<dyn ValueValidator>;
+        let validator_fn: ValidatorFn = {
+            let v = Arc::clone(&validator);
+            Arc::new(
+                move |value: &serde_json::Value, path: &crate::path::JsonPath| {
+                    v.validate_value(value, path)
+                },
+            )
+        };
+        CombinatorSchema::Optional {
+            inner: validator_fn,
+            validator,
+        }
+    }
+
+    /// Creates a reference to a named schema.
+    ///
+    /// Schema references enable reuse and recursive structures. The referenced
+    /// schema must be registered in a `SchemaRegistry` before validation.
+    ///
+    /// References can only be validated through a registry. Attempting to validate
+    /// without a registry produces an error with code `missing_registry`.
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// use postmortem::{Schema, SchemaRegistry};
+    /// use serde_json::json;
+    ///
+    /// let registry = SchemaRegistry::new();
+    ///
+    /// // Register base schema
+    /// registry.register("UserId", Schema::integer().positive()).unwrap();
+    ///
+    /// // Use reference in another schema
+    /// registry.register("User", Schema::object()
+    ///     .field("id", Schema::ref_("UserId"))
+    ///     .field("name", Schema::string())
+    /// ).unwrap();
+    ///
+    /// let result = registry.validate("User", &json!({
+    ///     "id": 42,
+    ///     "name": "Alice"
+    /// })).unwrap();
+    ///
+    /// assert!(result.is_success());
+    /// ```
+    pub fn ref_(name: impl Into<String>) -> RefSchema {
+        RefSchema::new(name)
     }
 }
