@@ -3,7 +3,22 @@
 //! This module provides async validation capabilities for scenarios that
 //! require I/O operations, such as database lookups or API calls.
 //!
-//! Note: This is a simplified implementation compatible with stillwater 0.12.
+//! # API Design Note
+//!
+//! This implementation uses a simplified API compatible with stillwater 0.12.
+//! Rather than wrapping validators in Effect<E, Er, R> types, we use direct
+//! trait methods that accept environment parameters and return Validation
+//! results.
+//!
+//! This approach provides the same dependency injection benefits as a full
+//! Effect system while maintaining API simplicity:
+//! - Environment dependencies passed explicitly via type parameters
+//! - Validation results use stillwater's Validation type for error accumulation
+//! - Testability through trait-based environment abstraction
+//!
+//! The `validate_with_env` extension method on schema types provides ergonomic
+//! integration with custom validation logic that needs access to environment
+//! dependencies like databases or external APIs.
 
 use serde_json::Value;
 use stillwater::Validation;

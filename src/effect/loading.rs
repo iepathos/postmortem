@@ -5,8 +5,20 @@
 //! - Accumulates parsing and validation errors
 //! - Integrates with environment abstraction
 //!
-//! Note: This is a simplified implementation that doesn't require
-//! stillwater's Env trait, making it compatible with stillwater 0.12.
+//! # API Design Note
+//!
+//! This implementation uses a simplified API compatible with stillwater 0.12,
+//! rather than the full Effect<E, Er, R> type mentioned in the original spec.
+//! Functions accept environment parameters directly and return Result or
+//! Validation types instead of Effect wrappers.
+//!
+//! This pragmatic approach provides the same dependency injection benefits:
+//! - Testability via trait-based abstractions (SchemaEnv, FileSystem)
+//! - Flexibility to swap implementations (mock vs real filesystem)
+//! - Clear separation of pure logic from I/O operations
+//!
+//! While simpler than a full Effect system, this design is well-suited for
+//! stillwater 0.12's capabilities and provides a clean, ergonomic API.
 
 use serde_json::Value;
 use std::path::{Path, PathBuf};

@@ -207,6 +207,105 @@ let schema = Schema::object()
     });
 ```
 
+### Effect Integration
+
+For advanced use cases requiring dependency injection, async validation, or schema loading from external sources, **postmortem** provides Effect integration:
+
+```rust
+use postmortem::effect::{SchemaEnv, FileSystem, load_schemas_from_dir, AsyncValidator};
+use std::path::{Path, PathBuf};
+use std::fs;
+
+// 1. Implement FileSystem for your storage backend
+struct RealFileSystem;
+
+impl FileSystem for RealFileSystem {
+    type Error = std::io::Error;
+
+    fn read_file(&self, path: &Path) -> Result<String, Self::Error> {
+        fs::read_to_string(path)
+    }
+
+    fn read_dir(&self, path: &Path) -> Result<Vec<PathBuf>, Self::Error> {
+        fs::read_dir(path)?
+            .filter_map(|e| e.ok().map(|e| e.path()))
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|_| std::io::Error::new(
+                std::io::ErrorKind::Other,
+                "failed to read dir entry"
+            ))
+    }
+}
+
+// 2. Implement SchemaEnv to provide environment dependencies
+struct AppEnv {
+    fs: RealFileSystem,
+}
+
+impl SchemaEnv for AppEnv {
+    type Fs = RealFileSystem;
+
+    fn filesystem(&self) -> &Self::Fs {
+        &self.fs
+    }
+}
+
+// 3. Load schemas from a directory
+let env = AppEnv { fs: RealFileSystem };
+let schemas_dir = Path::new("./schemas");
+
+let registry = load_schemas_from_dir(&env, schemas_dir)?;
+
+// 4. Use the loaded schemas for validation
+let user_data = json!({
+    "email": "user@example.com",
+    "age": 25
+});
+
+let result = registry.validate("user", &user_data);
+
+// 5. For async validation with environment dependencies
+use postmortem::effect::StringSchemaExt;
+
+struct DatabaseEnv {
+    connection_string: String,
+}
+
+let email_schema = Schema::string()
+    .min_len(1)
+    .validate_with_env(|value, path, env: &DatabaseEnv| {
+        // Access database via environment
+        let email = value.as_str().unwrap_or("");
+
+        // Check uniqueness (simplified example)
+        if email == "taken@example.com" {
+            Validation::Failure(SchemaErrors::single(
+                SchemaError::new(path.clone(), "email already exists")
+            ))
+        } else {
+            Validation::Success(())
+        }
+    });
+
+let db_env = DatabaseEnv {
+    connection_string: "postgres://localhost/mydb".to_string(),
+};
+
+let result = email_schema.validate_with_env(
+    &json!("user@example.com"),
+    &JsonPath::root(),
+    &db_env
+);
+```
+
+This Effect-based approach provides:
+- **Dependency injection** — Pass environment dependencies explicitly
+- **Testability** — Mock filesystems and databases in tests
+- **Flexibility** — Support different storage backends and async operations
+- **Error accumulation** — All validation errors collected, even across I/O operations
+
+Note: The Effect integration uses a simplified API compatible with stillwater 0.12. Instead of returning `Effect<E, Er, R>` types, functions accept environment parameters directly and return `Result` or `Validation` types. This provides the same dependency injection benefits with a more straightforward API.
+
 ## Design Philosophy
 
 **postmortem** is built on functional programming principles:
