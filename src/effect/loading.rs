@@ -161,12 +161,9 @@ fn parse_and_register_schema(
     json: &Value,
     path: &Path,
 ) -> Result<(), SchemaLoadError> {
-    let schema_type = json
-        .get("type")
-        .and_then(|v| v.as_str())
-        .ok_or_else(|| {
-            SchemaLoadError::Schema(path.to_path_buf(), "Missing 'type' field".to_string())
-        })?;
+    let schema_type = json.get("type").and_then(|v| v.as_str()).ok_or_else(|| {
+        SchemaLoadError::Schema(path.to_path_buf(), "Missing 'type' field".to_string())
+    })?;
 
     match schema_type {
         "string" => {
