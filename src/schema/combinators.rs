@@ -222,7 +222,12 @@ impl CombinatorSchema {
         let results: Vec<_> = validators
             .iter()
             .enumerate()
-            .map(|(i, validator)| (i, validator.validate_value_with_context(value, path, context)))
+            .map(|(i, validator)| {
+                (
+                    i,
+                    validator.validate_value_with_context(value, path, context),
+                )
+            })
             .collect();
 
         let valid: Vec<_> = results.iter().filter(|(_, r)| r.is_success()).collect();

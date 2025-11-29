@@ -66,8 +66,5 @@ impl ValidationContext {
 /// between the validation module and the registry module.
 pub trait RegistryAccess: Send + Sync {
     /// Gets a schema by name from the registry.
-    fn get_schema(
-        &self,
-        name: &str,
-    ) -> Option<Arc<dyn crate::schema::ValueValidator>>;
+    fn get_schema(&self, name: &str) -> Option<Arc<dyn crate::schema::ValueValidator>>;
 }

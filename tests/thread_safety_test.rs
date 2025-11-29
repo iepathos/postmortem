@@ -10,19 +10,27 @@ fn test_concurrent_validation() {
     let registry = Arc::new(SchemaRegistry::new());
 
     registry
-        .register("User", Schema::object()
-            .field("name", Schema::string())
-            .field("age", Schema::integer().positive()))
+        .register(
+            "User",
+            Schema::object()
+                .field("name", Schema::string())
+                .field("age", Schema::integer().positive()),
+        )
         .unwrap();
 
     let handles: Vec<_> = (0..10)
         .map(|i| {
             let registry = Arc::clone(&registry);
             thread::spawn(move || {
-                let result = registry.validate("User", &json!({
-                    "name": format!("User{}", i),
-                    "age": 20 + i
-                })).unwrap();
+                let result = registry
+                    .validate(
+                        "User",
+                        &json!({
+                            "name": format!("User{}", i),
+                            "age": 20 + i
+                        }),
+                    )
+                    .unwrap();
                 assert!(result.is_success());
             })
         })
@@ -37,9 +45,7 @@ fn test_concurrent_validation() {
 fn test_concurrent_schema_access() {
     let registry = Arc::new(SchemaRegistry::new());
 
-    registry
-        .register("Email", Schema::string())
-        .unwrap();
+    registry.register("Email", Schema::string()).unwrap();
 
     let handles: Vec<_> = (0..10)
         .map(|_| {
@@ -65,19 +71,27 @@ fn test_concurrent_validation_with_refs() {
         .unwrap();
 
     registry
-        .register("User", Schema::object()
-            .field("id", Schema::ref_("UserId"))
-            .field("name", Schema::string()))
+        .register(
+            "User",
+            Schema::object()
+                .field("id", Schema::ref_("UserId"))
+                .field("name", Schema::string()),
+        )
         .unwrap();
 
     let handles: Vec<_> = (0..10)
         .map(|i| {
             let registry = Arc::clone(&registry);
             thread::spawn(move || {
-                let result = registry.validate("User", &json!({
-                    "id": i + 1,
-                    "name": format!("User{}", i)
-                })).unwrap();
+                let result = registry
+                    .validate(
+                        "User",
+                        &json!({
+                            "id": i + 1,
+                            "name": format!("User{}", i)
+                        }),
+                    )
+                    .unwrap();
                 assert!(result.is_success());
             })
         })
@@ -93,24 +107,32 @@ fn test_concurrent_recursive_validation() {
     let registry = Arc::new(SchemaRegistry::new());
 
     registry
-        .register("Node", Schema::object()
-            .field("value", Schema::integer())
-            .optional("next", Schema::ref_("Node")))
+        .register(
+            "Node",
+            Schema::object()
+                .field("value", Schema::integer())
+                .optional("next", Schema::ref_("Node")),
+        )
         .unwrap();
 
     let handles: Vec<_> = (0..10)
         .map(|i| {
             let registry = Arc::clone(&registry);
             thread::spawn(move || {
-                let result = registry.validate("Node", &json!({
-                    "value": i,
-                    "next": {
-                        "value": i + 1,
-                        "next": {
-                            "value": i + 2
-                        }
-                    }
-                })).unwrap();
+                let result = registry
+                    .validate(
+                        "Node",
+                        &json!({
+                            "value": i,
+                            "next": {
+                                "value": i + 1,
+                                "next": {
+                                    "value": i + 2
+                                }
+                            }
+                        }),
+                    )
+                    .unwrap();
                 assert!(result.is_success());
             })
         })
@@ -125,9 +147,7 @@ fn test_concurrent_recursive_validation() {
 fn test_registry_clone_thread_safety() {
     let registry = SchemaRegistry::new();
 
-    registry
-        .register("Test", Schema::string())
-        .unwrap();
+    registry.register("Test", Schema::string()).unwrap();
 
     let cloned = registry.clone();
     let registry1 = Arc::new(registry);
@@ -162,8 +182,7 @@ fn test_concurrent_mixed_operations() {
         .unwrap();
 
     registry
-        .register("User", Schema::object()
-            .field("id", Schema::ref_("UserId")))
+        .register("User", Schema::object().field("id", Schema::ref_("UserId")))
         .unwrap();
 
     let handles: Vec<_> = (0..20)
@@ -172,9 +191,14 @@ fn test_concurrent_mixed_operations() {
             thread::spawn(move || {
                 if i % 2 == 0 {
                     // Even threads validate
-                    let result = registry.validate("User", &json!({
-                        "id": i + 1
-                    })).unwrap();
+                    let result = registry
+                        .validate(
+                            "User",
+                            &json!({
+                                "id": i + 1
+                            }),
+                        )
+                        .unwrap();
                     assert!(result.is_success());
                 } else {
                     // Odd threads just get schema
@@ -194,13 +218,9 @@ fn test_concurrent_mixed_operations() {
 fn test_concurrent_validate_refs() {
     let registry = Arc::new(SchemaRegistry::new());
 
-    registry
-        .register("A", Schema::ref_("B"))
-        .unwrap();
+    registry.register("A", Schema::ref_("B")).unwrap();
 
-    registry
-        .register("B", Schema::string())
-        .unwrap();
+    registry.register("B", Schema::string()).unwrap();
 
     let handles: Vec<_> = (0..10)
         .map(|_| {
@@ -221,19 +241,20 @@ fn test_concurrent_validate_refs() {
 fn test_stress_concurrent_validation() {
     let registry = Arc::new(SchemaRegistry::new());
 
-    registry
-        .register("Email", Schema::string())
-        .unwrap();
+    registry.register("Email", Schema::string()).unwrap();
 
     registry
         .register("UserId", Schema::integer().positive())
         .unwrap();
 
     registry
-        .register("User", Schema::object()
-            .field("id", Schema::ref_("UserId"))
-            .field("email", Schema::ref_("Email"))
-            .field("name", Schema::string()))
+        .register(
+            "User",
+            Schema::object()
+                .field("id", Schema::ref_("UserId"))
+                .field("email", Schema::ref_("Email"))
+                .field("name", Schema::string()),
+        )
         .unwrap();
 
     // Create 100 threads all validating concurrently
@@ -242,11 +263,16 @@ fn test_stress_concurrent_validation() {
             let registry = Arc::clone(&registry);
             thread::spawn(move || {
                 for j in 0..10 {
-                    let result = registry.validate("User", &json!({
-                        "id": i * 10 + j + 1,
-                        "email": format!("user{}@example.com", i),
-                        "name": format!("User {}", i)
-                    })).unwrap();
+                    let result = registry
+                        .validate(
+                            "User",
+                            &json!({
+                                "id": i * 10 + j + 1,
+                                "email": format!("user{}@example.com", i),
+                                "name": format!("User {}", i)
+                            }),
+                        )
+                        .unwrap();
                     assert!(result.is_success());
                 }
             })
@@ -262,17 +288,12 @@ fn test_stress_concurrent_validation() {
 fn test_concurrent_access_different_schemas() {
     let registry = Arc::new(SchemaRegistry::new());
 
-    registry
-        .register("String", Schema::string())
-        .unwrap();
+    registry.register("String", Schema::string()).unwrap();
+
+    registry.register("Integer", Schema::integer()).unwrap();
 
     registry
-        .register("Integer", Schema::integer())
-        .unwrap();
-
-    registry
-        .register("Object", Schema::object()
-            .field("value", Schema::string()))
+        .register("Object", Schema::object().field("value", Schema::string()))
         .unwrap();
 
     let schemas = ["String", "Integer", "Object"];

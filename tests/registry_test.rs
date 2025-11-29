@@ -22,9 +22,7 @@ fn test_register_and_get() {
 fn test_duplicate_registration_fails() {
     let registry = SchemaRegistry::new();
 
-    registry
-        .register("Email", Schema::string())
-        .unwrap();
+    registry.register("Email", Schema::string()).unwrap();
 
     let result = registry.register("Email", Schema::integer());
     assert!(result.is_err());
@@ -35,15 +33,23 @@ fn test_validate_with_registry() {
     let registry = SchemaRegistry::new();
 
     registry
-        .register("User", Schema::object()
-            .field("name", Schema::string().min_len(1))
-            .field("age", Schema::integer().positive()))
+        .register(
+            "User",
+            Schema::object()
+                .field("name", Schema::string().min_len(1))
+                .field("age", Schema::integer().positive()),
+        )
         .unwrap();
 
-    let result = registry.validate("User", &json!({
-        "name": "Alice",
-        "age": 30
-    })).unwrap();
+    let result = registry
+        .validate(
+            "User",
+            &json!({
+                "name": "Alice",
+                "age": 30
+            }),
+        )
+        .unwrap();
 
     assert!(result.is_success());
 }
@@ -60,9 +66,7 @@ fn test_validate_missing_schema() {
 fn test_max_depth_configuration() {
     let registry = SchemaRegistry::new().with_max_depth(50);
 
-    registry
-        .register("Simple", Schema::string())
-        .unwrap();
+    registry.register("Simple", Schema::string()).unwrap();
 
     // Should still work normally
     let result = registry.validate("Simple", &json!("test")).unwrap();
@@ -78,9 +82,12 @@ fn test_validate_refs_with_valid_references() {
         .unwrap();
 
     registry
-        .register("User", Schema::object()
-            .field("id", Schema::ref_("UserId"))
-            .field("name", Schema::string()))
+        .register(
+            "User",
+            Schema::object()
+                .field("id", Schema::ref_("UserId"))
+                .field("name", Schema::string()),
+        )
         .unwrap();
 
     let unresolved = registry.validate_refs();
@@ -92,8 +99,7 @@ fn test_validate_refs_with_missing_references() {
     let registry = SchemaRegistry::new();
 
     registry
-        .register("User", Schema::object()
-            .field("id", Schema::ref_("UserId")))
+        .register("User", Schema::object().field("id", Schema::ref_("UserId")))
         .unwrap();
 
     let unresolved = registry.validate_refs();
@@ -105,9 +111,12 @@ fn test_validate_refs_with_multiple_missing() {
     let registry = SchemaRegistry::new();
 
     registry
-        .register("User", Schema::object()
-            .field("id", Schema::ref_("UserId"))
-            .field("role", Schema::ref_("Role")))
+        .register(
+            "User",
+            Schema::object()
+                .field("id", Schema::ref_("UserId"))
+                .field("role", Schema::ref_("Role")),
+        )
         .unwrap();
 
     let mut unresolved = registry.validate_refs();
@@ -119,9 +128,7 @@ fn test_validate_refs_with_multiple_missing() {
 fn test_registry_clone() {
     let registry = SchemaRegistry::new();
 
-    registry
-        .register("Email", Schema::string())
-        .unwrap();
+    registry.register("Email", Schema::string()).unwrap();
 
     let cloned = registry.clone();
 
@@ -138,20 +145,26 @@ fn test_validation_with_nested_refs() {
         .register("UserId", Schema::integer().positive())
         .unwrap();
 
-    registry
-        .register("Email", Schema::string())
-        .unwrap();
+    registry.register("Email", Schema::string()).unwrap();
 
     registry
-        .register("User", Schema::object()
-            .field("id", Schema::ref_("UserId"))
-            .field("email", Schema::ref_("Email")))
+        .register(
+            "User",
+            Schema::object()
+                .field("id", Schema::ref_("UserId"))
+                .field("email", Schema::ref_("Email")),
+        )
         .unwrap();
 
-    let result = registry.validate("User", &json!({
-        "id": 42,
-        "email": "test@example.com"
-    })).unwrap();
+    let result = registry
+        .validate(
+            "User",
+            &json!({
+                "id": 42,
+                "email": "test@example.com"
+            }),
+        )
+        .unwrap();
 
     assert!(result.is_success());
 }
@@ -165,13 +178,17 @@ fn test_validation_with_invalid_nested_ref() {
         .unwrap();
 
     registry
-        .register("User", Schema::object()
-            .field("id", Schema::ref_("UserId")))
+        .register("User", Schema::object().field("id", Schema::ref_("UserId")))
         .unwrap();
 
-    let result = registry.validate("User", &json!({
-        "id": -5
-    })).unwrap();
+    let result = registry
+        .validate(
+            "User",
+            &json!({
+                "id": -5
+            }),
+        )
+        .unwrap();
 
     assert!(result.is_failure());
 }
@@ -180,9 +197,7 @@ fn test_validation_with_invalid_nested_ref() {
 fn test_default_registry() {
     let registry = SchemaRegistry::default();
 
-    registry
-        .register("Test", Schema::string())
-        .unwrap();
+    registry.register("Test", Schema::string()).unwrap();
 
     assert!(registry.get("Test").is_some());
 }

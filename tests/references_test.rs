@@ -31,15 +31,23 @@ fn test_ref_in_object_field() {
         .unwrap();
 
     registry
-        .register("User", Schema::object()
-            .field("id", Schema::ref_("UserId"))
-            .field("name", Schema::string()))
+        .register(
+            "User",
+            Schema::object()
+                .field("id", Schema::ref_("UserId"))
+                .field("name", Schema::string()),
+        )
         .unwrap();
 
-    let result = registry.validate("User", &json!({
-        "id": 42,
-        "name": "Alice"
-    })).unwrap();
+    let result = registry
+        .validate(
+            "User",
+            &json!({
+                "id": 42,
+                "name": "Alice"
+            }),
+        )
+        .unwrap();
 
     assert!(result.is_success());
 }
@@ -57,10 +65,13 @@ fn test_ref_in_one_of_combinator() {
         .unwrap();
 
     registry
-        .register("Id", Schema::one_of(vec![
-            Box::new(Schema::ref_("StringId")) as Box<dyn ValueValidator>,
-            Box::new(Schema::ref_("IntegerId")) as Box<dyn ValueValidator>,
-        ]))
+        .register(
+            "Id",
+            Schema::one_of(vec![
+                Box::new(Schema::ref_("StringId")) as Box<dyn ValueValidator>,
+                Box::new(Schema::ref_("IntegerId")) as Box<dyn ValueValidator>,
+            ]),
+        )
         .unwrap();
 
     let result = registry.validate("Id", &json!("abc-123")).unwrap();
@@ -77,22 +88,23 @@ fn test_ref_in_one_of_combinator() {
 fn test_ref_in_any_of_combinator() {
     let registry = SchemaRegistry::new();
 
-    registry
-        .register("Email", Schema::string())
-        .unwrap();
+    registry.register("Email", Schema::string()).unwrap();
+
+    registry.register("PhoneNumber", Schema::string()).unwrap();
 
     registry
-        .register("PhoneNumber", Schema::string())
+        .register(
+            "Contact",
+            Schema::any_of(vec![
+                Box::new(Schema::ref_("Email")) as Box<dyn ValueValidator>,
+                Box::new(Schema::ref_("PhoneNumber")) as Box<dyn ValueValidator>,
+            ]),
+        )
         .unwrap();
 
-    registry
-        .register("Contact", Schema::any_of(vec![
-            Box::new(Schema::ref_("Email")) as Box<dyn ValueValidator>,
-            Box::new(Schema::ref_("PhoneNumber")) as Box<dyn ValueValidator>,
-        ]))
+    let result = registry
+        .validate("Contact", &json!("test@example.com"))
         .unwrap();
-
-    let result = registry.validate("Contact", &json!("test@example.com")).unwrap();
     assert!(result.is_success());
 }
 
@@ -101,26 +113,35 @@ fn test_ref_in_all_of_combinator() {
     let registry = SchemaRegistry::new();
 
     registry
-        .register("Named", Schema::object()
-            .field("name", Schema::string()))
+        .register("Named", Schema::object().field("name", Schema::string()))
         .unwrap();
 
     registry
-        .register("Timestamped", Schema::object()
-            .field("created_at", Schema::string()))
+        .register(
+            "Timestamped",
+            Schema::object().field("created_at", Schema::string()),
+        )
         .unwrap();
 
     registry
-        .register("Entity", Schema::all_of(vec![
-            Box::new(Schema::ref_("Named")) as Box<dyn ValueValidator>,
-            Box::new(Schema::ref_("Timestamped")) as Box<dyn ValueValidator>,
-        ]))
+        .register(
+            "Entity",
+            Schema::all_of(vec![
+                Box::new(Schema::ref_("Named")) as Box<dyn ValueValidator>,
+                Box::new(Schema::ref_("Timestamped")) as Box<dyn ValueValidator>,
+            ]),
+        )
         .unwrap();
 
-    let result = registry.validate("Entity", &json!({
-        "name": "Test",
-        "created_at": "2025-01-01"
-    })).unwrap();
+    let result = registry
+        .validate(
+            "Entity",
+            &json!({
+                "name": "Test",
+                "created_at": "2025-01-01"
+            }),
+        )
+        .unwrap();
 
     assert!(result.is_success());
 }
@@ -129,20 +150,21 @@ fn test_ref_in_all_of_combinator() {
 fn test_ref_in_optional_combinator() {
     let registry = SchemaRegistry::new();
 
-    registry
-        .register("Email", Schema::string())
-        .unwrap();
+    registry.register("Email", Schema::string()).unwrap();
 
     registry
-        .register("OptionalEmail", Schema::optional(
-            Box::new(Schema::ref_("Email")) as Box<dyn ValueValidator>
-        ))
+        .register(
+            "OptionalEmail",
+            Schema::optional(Box::new(Schema::ref_("Email")) as Box<dyn ValueValidator>),
+        )
         .unwrap();
 
     let result = registry.validate("OptionalEmail", &json!(null)).unwrap();
     assert!(result.is_success());
 
-    let result = registry.validate("OptionalEmail", &json!("test@example.com")).unwrap();
+    let result = registry
+        .validate("OptionalEmail", &json!("test@example.com"))
+        .unwrap();
     assert!(result.is_success());
 }
 
@@ -178,28 +200,44 @@ fn test_nested_combinator_refs() {
         .unwrap();
 
     registry
-        .register("Id", Schema::any_of(vec![
-            Box::new(Schema::ref_("StringId")) as Box<dyn ValueValidator>,
-            Box::new(Schema::ref_("IntegerId")) as Box<dyn ValueValidator>,
-        ]))
+        .register(
+            "Id",
+            Schema::any_of(vec![
+                Box::new(Schema::ref_("StringId")) as Box<dyn ValueValidator>,
+                Box::new(Schema::ref_("IntegerId")) as Box<dyn ValueValidator>,
+            ]),
+        )
         .unwrap();
 
     registry
-        .register("Entity", Schema::object()
-            .field("id", Schema::ref_("Id"))
-            .field("name", Schema::string()))
+        .register(
+            "Entity",
+            Schema::object()
+                .field("id", Schema::ref_("Id"))
+                .field("name", Schema::string()),
+        )
         .unwrap();
 
-    let result = registry.validate("Entity", &json!({
-        "id": "abc-123",
-        "name": "Test"
-    })).unwrap();
+    let result = registry
+        .validate(
+            "Entity",
+            &json!({
+                "id": "abc-123",
+                "name": "Test"
+            }),
+        )
+        .unwrap();
     assert!(result.is_success());
 
-    let result = registry.validate("Entity", &json!({
-        "id": 42,
-        "name": "Test"
-    })).unwrap();
+    let result = registry
+        .validate(
+            "Entity",
+            &json!({
+                "id": 42,
+                "name": "Test"
+            }),
+        )
+        .unwrap();
     assert!(result.is_success());
 }
 
@@ -241,13 +279,20 @@ fn test_ref_resolution_error() {
     let registry = SchemaRegistry::new();
 
     registry
-        .register("User", Schema::object()
-            .field("id", Schema::ref_("MissingId")))
+        .register(
+            "User",
+            Schema::object().field("id", Schema::ref_("MissingId")),
+        )
         .unwrap();
 
-    let result = registry.validate("User", &json!({
-        "id": 42
-    })).unwrap();
+    let result = registry
+        .validate(
+            "User",
+            &json!({
+                "id": 42
+            }),
+        )
+        .unwrap();
 
     assert!(result.is_failure());
 }
