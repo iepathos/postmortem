@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.1] - 2025-12-14
+
+### Added
+
+- **JSON Schema Export** - Convert postmortem schemas to JSON Schema format for interoperability
+- **Effect Integration** - Optional `effect` feature for integrating validation with stillwater's effect system
+
+### Changed
+
+- **stillwater** dependency updated from 0.11 to 0.13
+
+### CI
+
+- Updated actions/upload-artifact from 5 to 6
+- Updated actions/cache from 4 to 5
+
 ## [0.1.0] - 2025-11-28
 
 ### Added
@@ -38,5 +54,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `indexmap` 2.12 - Ordered maps for object schemas
 - `parking_lot` 0.12 - Efficient synchronization for registry
 
-[Unreleased]: https://github.com/iepathos/postmortem/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/iepathos/postmortem/compare/v0.1.1...HEAD
+[0.1.1]: https://github.com/iepathos/postmortem/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/iepathos/postmortem/releases/tag/v0.1.0
