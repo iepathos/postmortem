@@ -3,7 +3,8 @@
 > Learn what went wrong—all at once.
 
 [![Crates.io](https://img.shields.io/crates/v/postmortem.svg)](https://crates.io/crates/postmortem)
-[![Documentation](https://docs.rs/postmortem/badge.svg)](https://docs.rs/postmortem)
+[![Downloads](https://img.shields.io/crates/d/postmortem)](https://crates.io/crates/postmortem)
+[![CI](https://github.com/iepathos/postmortem/actions/workflows/ci.yml/badge.svg)](https://github.com/iepathos/postmortem/actions/workflows/ci.yml)
 [![License](https://img.shields.io/badge/license-MIT)](LICENSE)
 
 A validation library that accumulates **all** validation errors instead of short-circuiting on the first failure.
