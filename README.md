@@ -2,8 +2,8 @@
 
 > Learn what went wrong—all at once.
 
-[![Crates.io](https://img.shields.io/crates/v/postmortem.svg)](https://crates.io/crates/postmortem)
-[![Downloads](https://img.shields.io/crates/d/postmortem)](https://crates.io/crates/postmortem)
+[![Crates.io](https://badgen.net/crates/v/postmortem)](https://crates.io/crates/postmortem)
+[![Downloads](https://badgen.net/crates/d/postmortem)](https://crates.io/crates/postmortem)
 [![CI](https://github.com/iepathos/postmortem/actions/workflows/ci.yml/badge.svg)](https://github.com/iepathos/postmortem/actions/workflows/ci.yml)
 [![License](https://img.shields.io/badge/license-MIT)](LICENSE)
 
